@@ -1,0 +1,95 @@
+import io
+from http import cookies
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from wsgiref.util import setup_testing_defaults
+
+from app import TaskTrackerApp
+
+
+def call_app(app, method="GET", path="/", body="", cookie_header=""):
+    environ = {}
+    setup_testing_defaults(environ)
+    environ["REQUEST_METHOD"] = method
+    environ["PATH_INFO"] = path
+    data = body.encode("utf-8")
+    environ["CONTENT_LENGTH"] = str(len(data))
+    environ["wsgi.input"] = io.BytesIO(data)
+    environ["CONTENT_TYPE"] = "application/x-www-form-urlencoded"
+    if cookie_header:
+        environ["HTTP_COOKIE"] = cookie_header
+
+    result = {}
+
+    def start_response(status, headers):
+        result["status"] = status
+        result["headers"] = headers
+
+    chunks = app(environ, start_response)
+    result["body"] = b"".join(chunks).decode("utf-8")
+    return result
+
+
+def merge_cookies(old_cookie_header, response_headers):
+    jar = cookies.SimpleCookie()
+    if old_cookie_header:
+        jar.load(old_cookie_header)
+    for header, value in response_headers:
+        if header.lower() == "set-cookie":
+            jar.load(value)
+    return "; ".join(f"{k}={m.value}" for k, m in jar.items() if m.value)
+
+
+class AppTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = TemporaryDirectory()
+        self.db_path = str(Path(self.tmp.name) / "test.db")
+        self.app = TaskTrackerApp(db_path=self.db_path, secret_key="test-secret")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_login_required_redirects_to_login(self):
+        response = call_app(self.app, method="GET", path="/")
+        self.assertTrue(response["status"].startswith("302"))
+        headers = dict(response["headers"])
+        self.assertEqual(headers.get("Location"), "/login")
+
+    def test_two_users_see_shared_task_completion(self):
+        alex_cookie = ""
+        sam_cookie = ""
+
+        response = call_app(
+            self.app,
+            method="POST",
+            path="/login",
+            body="username=alex&password=password123",
+        )
+        alex_cookie = merge_cookies(alex_cookie, response["headers"])
+
+        response = call_app(
+            self.app,
+            method="POST",
+            path="/login",
+            body="username=sam&password=password123",
+        )
+        sam_cookie = merge_cookies(sam_cookie, response["headers"])
+
+        response = call_app(self.app, method="POST", path="/task/complete", cookie_header=alex_cookie)
+        alex_cookie = merge_cookies(alex_cookie, response["headers"])
+
+        sam_dashboard = call_app(self.app, method="GET", path="/", cookie_header=sam_cookie)
+        self.assertIn("Alex", sam_dashboard["body"])
+        self.assertIn("Sam", sam_dashboard["body"])
+        self.assertEqual(sam_dashboard["body"].count("Completed"), 1)
+
+        response = call_app(self.app, method="POST", path="/task/complete", cookie_header=sam_cookie)
+        sam_cookie = merge_cookies(sam_cookie, response["headers"])
+
+        alex_dashboard = call_app(self.app, method="GET", path="/", cookie_header=alex_cookie)
+        self.assertEqual(alex_dashboard["body"].count("Completed"), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
