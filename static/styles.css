@@ -1,0 +1,154 @@
+:root {
+  --bg: #f2f5ff;
+  --card: #ffffff;
+  --text: #1f2a44;
+  --primary: #4558ff;
+  --secondary: #dce3ff;
+  --success: #178a58;
+  --warning: #9f6d00;
+  --danger: #a52135;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: linear-gradient(160deg, var(--bg), #e5ecff);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.container {
+  width: min(850px, 94vw);
+  margin: 2rem auto;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(25, 38, 70, 0.08);
+  padding: 1.5rem;
+}
+
+.auth-card {
+  width: min(460px, 100%);
+  margin-inline: auto;
+}
+
+.subtitle {
+  margin-top: -0.3rem;
+  color: #5d6787;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+input {
+  border: 1px solid #cbd6ff;
+  border-radius: 10px;
+  padding: 0.65rem 0.75rem;
+  font-size: 1rem;
+}
+
+button {
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  border-radius: 10px;
+  padding: 0.7rem 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: var(--secondary);
+  color: var(--text);
+}
+
+.hint ul {
+  margin: 0.4rem 0 0;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.task-card {
+  margin: 1.3rem 0;
+  background: #f8f9ff;
+  border: 1px solid #dde4ff;
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+.status-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f9fbff;
+  border: 1px solid #e4e9ff;
+  border-radius: 10px;
+  padding: 0.7rem;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.complete {
+  background: #dff6ea;
+  color: var(--success);
+}
+
+.pending {
+  background: #fff1d8;
+  color: var(--warning);
+}
+
+.flash-stack {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.flash {
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  font-weight: 600;
+}
+
+.flash.success {
+  background: #def7e8;
+  color: var(--success);
+}
+
+.flash.error {
+  background: #ffe4e9;
+  color: var(--danger);
+}
