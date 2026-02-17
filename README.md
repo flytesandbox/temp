@@ -34,3 +34,14 @@ python -m unittest tests/test_app.py
 5. Visit live URL and run the two-user validation.
 
 A detailed step-by-step handoff log template is in [`DEPLOYMENT_LOG.md`](DEPLOYMENT_LOG.md).
+
+## 502 Bad Gateway troubleshooting
+
+If nginx is up but you still get `502`, check the app service first:
+
+```bash
+systemctl status monolith-task-tracker --no-pager
+journalctl -u monolith-task-tracker -n 100 --no-pager
+```
+
+If you see `can't open file '/opt/monolith-task-tracker/app.py'`, your systemd `WorkingDirectory` / `ExecStart` path does not match the folder where this repo was cloned (for example, some setups clone into `/opt/monolith-task-tracker/temp`). Update the unit file path, then reload and restart the service. Detailed commands are documented in [`DEPLOYMENT_LOG.md`](DEPLOYMENT_LOG.md).
