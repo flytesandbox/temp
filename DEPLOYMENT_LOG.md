@@ -101,21 +101,17 @@ You should see `app.py`, `requirements.txt`, etc.
 
 If `ls` only shows a single folder name (for example `temp`), then the repo was cloned into a nested directory instead of directly into `/opt/monolith-task-tracker`.
 
-Quick fix:
-
-```bash
-cd /opt/monolith-task-tracker/temp
-ls
-```
-
-If you now see `app.py` and `requirements.txt`, continue the rest of this guide from that folder, or move files up one level:
+**Recommended fix (best long-term): move files up one level so your app runs from `/opt/monolith-task-tracker`.**
 
 ```bash
 cd /opt/monolith-task-tracker
 mv temp/* .
 mv temp/.[!.]* . 2>/dev/null || true
 rmdir temp
+ls
 ```
+
+After moving files, you should see `app.py` and `requirements.txt` directly in `/opt/monolith-task-tracker`.
 
 ---
 
@@ -129,10 +125,11 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-If you kept the nested folder layout, use this instead:
+If you previously created a venv in the nested folder, rebuild it at the top level after moving files:
 
 ```bash
-cd /opt/monolith-task-tracker/temp
+cd /opt/monolith-task-tracker
+rm -rf .venv
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
@@ -171,7 +168,7 @@ pwd
 ls -la
 ```
 
-You should see `app.py` and `requirements.txt` in your current directory. If you accidentally cloned into a nested path (for example `/opt/monolith-task-tracker/temp`), use that real path in the service file below.
+You should see `app.py` and `requirements.txt` in your current directory. This guide assumes the app lives directly in `/opt/monolith-task-tracker`.
 
 Create service file:
 
@@ -216,7 +213,48 @@ If you see this in `journalctl`, your service paths are wrong for where the repo
 find /opt -maxdepth 4 -name app.py -path '*monolith-task-tracker*'
 ```
 
-2) Update the unit file to that path (example uses `/opt/monolith-task-tracker/temp`):
+2) If the app is under a nested folder today, either move files to `/opt/monolith-task-tracker` (recommended) or temporarily point the unit file at the nested path.
+
+Recommended cleanup (move files up, then keep unit file simple):
+
+```bash
+cd /opt/monolith-task-tracker
+mv temp/* .
+mv temp/.[!.]* . 2>/dev/null || true
+rmdir temp
+rm -rf .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Then ensure your service uses top-level paths:
+
+```bash
+cat > /etc/systemd/system/monolith-task-tracker.service <<'EOF_SERVICE'
+[Unit]
+Description=Monolith Task Tracker App
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/monolith-task-tracker
+Environment=SECRET_KEY=PASTE_YOUR_GENERATED_SECRET_KEY_HERE
+ExecStart=/opt/monolith-task-tracker/.venv/bin/python /opt/monolith-task-tracker/app.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+
+systemctl daemon-reload
+systemctl restart monolith-task-tracker
+systemctl status monolith-task-tracker --no-pager
+```
+
+Temporary alternative (if you cannot move files right now):
 
 ```bash
 cat > /etc/systemd/system/monolith-task-tracker.service <<'EOF_SERVICE'
