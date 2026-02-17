@@ -1,57 +1,313 @@
-# Deployment Log (Codespaces ➜ Linode)
+# Linode Setup + Deployment Log (Step-by-Step for Beginners)
 
-Use this file as a running log you can paste into ChatGPT between PRs.
+This file is a **copy/paste checklist + command guide** to get this exact repo running on your fresh Linode server and live on your domain.
 
-## Metadata
+---
 
-- Date:
-- Branch/PR:
-- Commit SHA:
-- Tester:
+## 0) What you are setting up (plain English)
 
-## Phase 1: Codespaces Validation
+You will do 5 things:
+1. Connect to your Linode over SSH.
+2. Install required software (Python, Git, Nginx).
+3. Copy this repo onto the server.
+4. Run the app in the background with `systemd`.
+5. Put Nginx in front so your domain points to the app on port 80 (and then add HTTPS).
 
-- [ ] Environment booted.
-- [ ] `python -m unittest tests/test_app.py`
-- [ ] `python app.py`
-- [ ] Logged in as `alex` and marked task complete.
-- [ ] Logged in as `sam` and verified Alex completion.
-- [ ] Marked task complete as `sam`.
-- [ ] Verified both users show **Completed**.
+Your server info:
+- Linode IP: `172.237.131.20`
+- Your domain A record: already pointed to this IP ✅
 
-### Notes
+---
 
-- Issues:
-- Fixes:
-- Remaining risks:
+## 1) Before you start
 
-## Phase 2: Linode Deployment
+### 1.1 On your local machine, make sure you can open a terminal
+- macOS: Terminal app
+- Windows: PowerShell (or Windows Terminal)
 
-### Server setup
+### 1.2 You need one of these to log into Linode
+- **Best:** SSH key already added to Linode at create time.
+- **Alternative:** root password from Linode dashboard.
 
-- [ ] Linode created + SSH working.
-- [ ] System packages installed.
-- [ ] Repo cloned/pulled.
-- [ ] Python env configured.
-- [ ] Environment variables set (`SECRET_KEY`, etc.).
+### 1.3 Know your Git repo URL
+You need a clone URL, such as:
+- HTTPS: `https://github.com/<your-user>/<your-repo>.git`
+- SSH: `git@github.com:<your-user>/<your-repo>.git`
 
-### App setup
+If your repo is private and cloning with HTTPS, you may need a GitHub Personal Access Token.
 
-- [ ] (Optional) dependencies installed.
-- [ ] App launched under process manager.
-- [ ] Reverse proxy configured.
-- [ ] HTTPS enabled.
+---
 
-### Live validation
+## 2) Connect to the server for the first time
 
-- [ ] Opened live site.
-- [ ] `alex` login + complete.
-- [ ] `sam` sees alex completion.
-- [ ] `sam` complete + both visible.
+From your local terminal:
 
-### Notes
+```bash
+ssh root@172.237.131.20
+```
 
-- Live URL:
-- Performance observations:
-- Errors/log snippets:
-- Next PR scope:
+If asked "Are you sure you want to continue connecting", type:
+
+```text
+yes
+```
+
+If successful, your prompt changes and you are now inside Linode.
+
+---
+
+## 3) Update server and install software
+
+Run these commands on Linode exactly:
+
+```bash
+apt update && apt upgrade -y
+apt install -y python3 python3-venv python3-pip git nginx ufw
+```
+
+Optional but recommended: allow firewall traffic:
+
+```bash
+ufw allow OpenSSH
+ufw allow 'Nginx Full'
+ufw --force enable
+ufw status
+```
+
+---
+
+## 4) Create a dedicated app folder and clone this repo
+
+Still on Linode:
+
+```bash
+mkdir -p /opt/monolith-task-tracker
+cd /opt/monolith-task-tracker
+```
+
+Clone your repo (replace URL):
+
+```bash
+git clone <YOUR_REPO_URL> .
+```
+
+Verify files are present:
+
+```bash
+ls
+```
+
+You should see `app.py`, `requirements.txt`, etc.
+
+---
+
+## 5) Create Python virtual environment and install dependencies
+
+```bash
+cd /opt/monolith-task-tracker
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Run tests (optional but recommended):
+
+```bash
+python -m unittest tests/test_app.py
+```
+
+---
+
+## 6) Set a production SECRET_KEY
+
+Generate a strong key:
+
+```bash
+python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
+```
+
+Copy the printed value. You will paste it into the service file in the next step.
+
+---
+
+## 7) Create a systemd service so app stays running
+
+Create service file:
+
+```bash
+cat > /etc/systemd/system/monolith-task-tracker.service <<'EOF_SERVICE'
+[Unit]
+Description=Monolith Task Tracker App
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/monolith-task-tracker
+Environment=SECRET_KEY=PASTE_YOUR_GENERATED_SECRET_KEY_HERE
+ExecStart=/opt/monolith-task-tracker/.venv/bin/python /opt/monolith-task-tracker/app.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+```
+
+Start and enable service:
+
+```bash
+systemctl daemon-reload
+systemctl enable monolith-task-tracker
+systemctl start monolith-task-tracker
+systemctl status monolith-task-tracker --no-pager
+```
+
+If status shows `active (running)`, app is running on internal port `8000`.
+
+---
+
+## 8) Configure Nginx to expose app on your domain
+
+Create Nginx config:
+
+```bash
+cat > /etc/nginx/sites-available/monolith-task-tracker <<'EOF_NGINX'
+server {
+    listen 80;
+    server_name www.yourdomain.com yourdomain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF_NGINX
+```
+
+Enable site:
+
+```bash
+ln -sf /etc/nginx/sites-available/monolith-task-tracker /etc/nginx/sites-enabled/monolith-task-tracker
+rm -f /etc/nginx/sites-enabled/default
+nginx -t
+systemctl restart nginx
+systemctl status nginx --no-pager
+```
+
+⚠️ Replace `www.yourdomain.com` and `yourdomain.com` with your real domain before running.
+
+---
+
+## 9) Test live site
+
+From your local browser, visit:
+- `http://yourdomain.com`
+- `http://www.yourdomain.com`
+
+Login credentials in this app:
+- user: `alex` / pass: `password123`
+- user: `sam` / pass: `password123`
+
+Validation flow:
+1. Login as alex, mark task complete.
+2. Logout, login as sam.
+3. Confirm Alex shows completed.
+4. Mark sam complete and verify both completed.
+
+---
+
+## 10) Add HTTPS (strongly recommended)
+
+Install Certbot:
+
+```bash
+apt install -y certbot python3-certbot-nginx
+```
+
+Request certificate (replace domain):
+
+```bash
+certbot --nginx -d yourdomain.com -d www.yourdomain.com
+```
+
+Test auto-renew:
+
+```bash
+certbot renew --dry-run
+```
+
+Now test:
+- `https://yourdomain.com`
+- `https://www.yourdomain.com`
+
+---
+
+## 11) How to deploy future updates from this repo
+
+Whenever you make changes in this repo and want them live:
+
+```bash
+ssh root@172.237.131.20
+cd /opt/monolith-task-tracker
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+systemctl restart monolith-task-tracker
+systemctl status monolith-task-tracker --no-pager
+```
+
+---
+
+## 12) Troubleshooting (copy/paste checks)
+
+If app not loading:
+
+```bash
+systemctl status monolith-task-tracker --no-pager
+journalctl -u monolith-task-tracker -n 100 --no-pager
+nginx -t
+systemctl status nginx --no-pager
+tail -n 100 /var/log/nginx/error.log
+```
+
+If DNS/domain not resolving yet:
+- DNS can take a little time to propagate.
+- Confirm A record is exactly `172.237.131.20`.
+
+If Git clone of private repo fails:
+- Use a GitHub token with HTTPS clone.
+- Or set up SSH deploy key for the server.
+
+---
+
+## 13) Progress tracker (check boxes)
+
+- [ ] SSH into Linode works.
+- [ ] Base packages installed.
+- [ ] Repo cloned to `/opt/monolith-task-tracker`.
+- [ ] Virtualenv created and dependencies installed.
+- [ ] systemd service created and running.
+- [ ] Nginx configured and running.
+- [ ] Domain opens app on HTTP.
+- [ ] HTTPS certificate installed.
+- [ ] Login flow verified for alex + sam.
+
+---
+
+## 14) Session notes
+
+Date:
+
+What worked:
+
+What failed:
+
+Next action:
