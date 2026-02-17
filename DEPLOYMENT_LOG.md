@@ -301,21 +301,74 @@ Now test:
 
 ## 11) How to deploy future updates from this repo
 
-Whenever you make changes in this repo and want them live:
+Whenever you make changes in this repo and want them live, do both parts below.
+
+### 11A) Push your latest app files from your local machine to GitHub
+
+Run these commands locally (inside your repo):
+
+```bash
+git status
+git add .
+git commit -m "Describe your change"
+git push origin <your-branch>
+```
+
+If you work directly from `main`, replace `<your-branch>` with `main`.
+
+### 11B) Pull and restart on Linode
 
 ```bash
 ssh root@172.237.131.20
 cd /opt/monolith-task-tracker
-git pull
+git pull origin main
 source .venv/bin/activate
 pip install -r requirements.txt
 systemctl restart monolith-task-tracker
 systemctl status monolith-task-tracker --no-pager
 ```
 
+If your deployment folder is `/opt/monolith-task-tracker/temp`, switch to that path before running the commands.
+
 ---
 
 ## 12) Troubleshooting (copy/paste checks)
+
+### 12A) If you get **502 Bad Gateway**
+
+A 502 usually means Nginx is up, but your Python app service is down or not reachable on `127.0.0.1:8000`.
+
+Run in this exact order:
+
+```bash
+systemctl status monolith-task-tracker --no-pager
+journalctl -u monolith-task-tracker -n 200 --no-pager
+ss -ltnp | rg ':8000'
+nginx -t
+systemctl status nginx --no-pager
+tail -n 100 /var/log/nginx/error.log
+```
+
+Quick recover sequence:
+
+```bash
+cd /opt/monolith-task-tracker
+git pull origin main
+source .venv/bin/activate
+pip install -r requirements.txt
+systemctl restart monolith-task-tracker
+systemctl restart nginx
+systemctl status monolith-task-tracker --no-pager
+systemctl status nginx --no-pager
+```
+
+If the app service keeps failing, check these common causes:
+- Wrong `WorkingDirectory` or `ExecStart` path in `/etc/systemd/system/monolith-task-tracker.service`.
+- Missing Python dependencies (fix with `pip install -r requirements.txt`).
+- Port mismatch (`proxy_pass http://127.0.0.1:8000;` in Nginx must match app port).
+- Syntax errors introduced in recent commits (inspect `journalctl` output).
+
+### 12B) General checks
 
 If app not loading:
 
