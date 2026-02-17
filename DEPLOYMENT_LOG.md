@@ -164,6 +164,15 @@ Copy the printed value. You will paste it into the service file in the next step
 
 ## 7) Create a systemd service so app stays running
 
+Before creating the service, **confirm where the repo actually lives**. A common cause of `502 Bad Gateway` is systemd pointing at a path that does not exist.
+
+```bash
+pwd
+ls -la
+```
+
+You should see `app.py` and `requirements.txt` in your current directory. If you accidentally cloned into a nested path (for example `/opt/monolith-task-tracker/temp`), use that real path in the service file below.
+
 Create service file:
 
 ```bash
@@ -196,6 +205,51 @@ systemctl status monolith-task-tracker --no-pager
 ```
 
 If status shows `active (running)`, app is running on internal port `8000`.
+
+### Quick fix for `can't open file '/opt/monolith-task-tracker/app.py'`
+
+If you see this in `journalctl`, your service paths are wrong for where the repo was actually cloned.
+
+1) Find the real app path:
+
+```bash
+find /opt -maxdepth 4 -name app.py -path '*monolith-task-tracker*'
+```
+
+2) Update the unit file to that path (example uses `/opt/monolith-task-tracker/temp`):
+
+```bash
+cat > /etc/systemd/system/monolith-task-tracker.service <<'EOF_SERVICE'
+[Unit]
+Description=Monolith Task Tracker App
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/monolith-task-tracker/temp
+Environment=SECRET_KEY=PASTE_YOUR_GENERATED_SECRET_KEY_HERE
+ExecStart=/opt/monolith-task-tracker/temp/.venv/bin/python /opt/monolith-task-tracker/temp/app.py
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
+EOF_SERVICE
+
+systemctl daemon-reload
+systemctl restart monolith-task-tracker
+systemctl status monolith-task-tracker --no-pager
+```
+
+3) Confirm app is listening before checking nginx:
+
+```bash
+ss -ltnp | grep ':8000'
+curl -I http://127.0.0.1:8000/
+```
+
+Only after those succeed should you test `http://your-domain/`.
 
 ---
 
