@@ -232,6 +232,27 @@ systemctl status nginx --no-pager
 
 ⚠️ Replace `www.yourdomain.com` and `yourdomain.com` with your real domain before running.
 
+
+If `nginx -t` passes but `systemctl restart nginx` fails with `status=208/STDIN` and a message like `Failed to set up standard input: No such file or directory`, your system is missing a valid `/dev/null` device (common in broken/chrooted environments).
+
+Quick fix:
+
+```bash
+ls -l /dev/null
+# expected: crw-rw-rw- ... /dev/null
+
+# If /dev/null is missing or not a character device:
+rm -f /dev/null
+mknod -m 666 /dev/null c 1 3
+chown root:root /dev/null
+
+systemctl daemon-reexec
+systemctl restart nginx
+systemctl status nginx --no-pager
+```
+
+If `mknod` is blocked by your environment/provider image, reboot the VM from the provider panel and retry.
+
 ---
 
 ## 9) Test live site
