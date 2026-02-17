@@ -6,66 +6,42 @@ on:
       ref:
         description: "Git ref (branch, tag, or SHA) to deploy"
         required: false
+        default: "main"
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
-      SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
-      DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
 
     steps:
       - name: Checkout selected ref
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || github.ref_name }}
-
-      - name: Validate deploy configuration
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in DEPLOY_SSH_KEY DEPLOY_HOST DEPLOY_USER DEPLOY_PATH; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required secret: $name"
-              missing=1
-            fi
-          done
-
-          if [ "$missing" -ne 0 ]; then
-            echo "One or more required deployment secrets are missing."
-            exit 1
-          fi
-
-      - name: Ensure deploy tooling is available
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y rsync openssh-client
+          ref: ${{ github.event.inputs.ref }}
 
       - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          set -euo pipefail
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
 
       - name: Add server to known_hosts
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
         run: |
-          set -euo pipefail
           PORT="${DEPLOY_PORT:-22}"
           ssh-keyscan -p "$PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
       - name: Sync repository to server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          set -euo pipefail
           PORT="${DEPLOY_PORT:-22}"
-
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
-
           rsync -az --delete \
             --exclude '.git' \
             --exclude '.github' \
@@ -74,16 +50,13 @@ jobs:
             ./ "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
       - name: Restart application service
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SERVICE_NAME: ${{ secrets.SERVICE_NAME }}
         run: |
-          set -euo pipefail
           PORT="${DEPLOY_PORT:-22}"
           SERVICE="${SERVICE_NAME:-monolith-task-tracker}"
-          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" "
-            if command -v sudo >/dev/null 2>&1; then
-              sudo systemctl restart '$SERVICE'
-              sudo systemctl status '$SERVICE' --no-pager
-            else
-              systemctl restart '$SERVICE'
-              systemctl status '$SERVICE' --no-pager
-            fi
-          "
+          ssh -p "$PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sudo systemctl restart $SERVICE && sudo systemctl status $SERVICE --no-pager"
