@@ -482,6 +482,85 @@ If Git clone of private repo fails:
 
 ---
 
+
+### 12C) If **GitHub manual deploy action** fails
+
+Open the failed run in **GitHub → Actions → Manual Deploy to Linode** and check the exact failing step.
+
+#### Common failure: "Missing required secret"
+The workflow now validates required secrets before deploy. Add these in:
+**Repo Settings → Secrets and variables → Actions**
+
+Required:
+- `DEPLOY_SSH_KEY` (private key content)
+- `DEPLOY_HOST` (server IP/host)
+- `DEPLOY_USER` (SSH user, often `root`)
+- `DEPLOY_PATH` (server path, e.g. `/opt/monolith-task-tracker`)
+
+Optional:
+- `DEPLOY_PORT` (defaults to `22`)
+- `SERVICE_NAME` (defaults to `monolith-task-tracker`)
+
+#### Common failure: SSH/host key errors
+Symptoms include:
+- `Host key verification failed`
+- `Permission denied (publickey)`
+- `Connection timed out`
+
+Checks:
+```bash
+# Run locally to verify the same key/user/host works
+ssh -i <private_key_file> <user>@<host>
+```
+
+Fixes:
+- Ensure the matching **public** key is in `~/.ssh/authorized_keys` on the server user.
+- Ensure `DEPLOY_HOST`, `DEPLOY_USER`, and `DEPLOY_PORT` are correct.
+- Ensure firewall allows SSH on the selected port.
+
+#### Common failure: rsync/path errors
+Symptoms include:
+- `rsync: command not found`
+- `No such file or directory`
+- permission errors writing into deploy path
+
+Fixes:
+```bash
+# On server
+apt update && apt install -y rsync
+mkdir -p /opt/monolith-task-tracker
+chown -R <deploy-user>:<deploy-user> /opt/monolith-task-tracker
+```
+
+If deploying as `root`, ownership may not be needed.
+
+#### Common failure: service restart fails
+Symptoms include:
+- `Unit monolith-task-tracker.service not found`
+- `sudo: a password is required`
+- service enters failed state after restart
+
+Checks/fixes on server:
+```bash
+systemctl list-unit-files | rg monolith-task-tracker
+systemctl status monolith-task-tracker --no-pager
+journalctl -u monolith-task-tracker -n 200 --no-pager
+```
+
+If deploy user is not root, allow passwordless sudo for service management:
+```bash
+visudo
+# add line (adjust user/service):
+<deploy-user> ALL=(ALL) NOPASSWD:/bin/systemctl restart monolith-task-tracker,/bin/systemctl status monolith-task-tracker
+```
+
+If service path/config is wrong, fix unit file and reload:
+```bash
+systemctl daemon-reload
+systemctl restart monolith-task-tracker
+```
+
+
 ## 13) Progress tracker (check boxes)
 
 - [ ] SSH into Linode works.
