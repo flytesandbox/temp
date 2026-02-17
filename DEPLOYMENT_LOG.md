@@ -99,12 +99,40 @@ ls
 
 You should see `app.py`, `requirements.txt`, etc.
 
+If `ls` only shows a single folder name (for example `temp`), then the repo was cloned into a nested directory instead of directly into `/opt/monolith-task-tracker`.
+
+Quick fix:
+
+```bash
+cd /opt/monolith-task-tracker/temp
+ls
+```
+
+If you now see `app.py` and `requirements.txt`, continue the rest of this guide from that folder, or move files up one level:
+
+```bash
+cd /opt/monolith-task-tracker
+mv temp/* .
+mv temp/.[!.]* . 2>/dev/null || true
+rmdir temp
+```
+
 ---
 
 ## 5) Create Python virtual environment and install dependencies
 
 ```bash
 cd /opt/monolith-task-tracker
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+If you kept the nested folder layout, use this instead:
+
+```bash
+cd /opt/monolith-task-tracker/temp
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
