@@ -221,10 +221,11 @@ class TaskTrackerApp:
             <section class=\"card auth-card\">
               <h1>Monolith Task Tracker</h1>
               <p class=\"subtitle\">Log in as one of the two demo users to validate shared task completion.</p>
+              <p class=\"subtitle\"><strong>New:</strong> UI smoke test build is active.</p>
               <form method=\"post\" action=\"/login\" class=\"form-grid\">
                 <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex or sam\" required /></label>
                 <label>Password<input type=\"password\" name=\"password\" placeholder=\"password123\" required /></label>
-                <button type=\"submit\">Log In</button>
+                <button type=\"submit\">Log In to Continue</button>
               </form>
               <div class=\"hint\"><strong>Demo accounts:</strong>
                 <ul><li><code>alex</code> / <code>password123</code></li><li><code>sam</code> / <code>password123</code></li></ul>
