@@ -56,6 +56,30 @@ class AppTests(unittest.TestCase):
         headers = dict(response["headers"])
         self.assertEqual(headers.get("Location"), "/login")
 
+
+    def test_login_works_without_content_length_header(self):
+        environ = {}
+        setup_testing_defaults(environ)
+        body = b"username=alex&password=password123"
+        environ["REQUEST_METHOD"] = "POST"
+        environ["PATH_INFO"] = "/login"
+        environ["wsgi.input"] = io.BytesIO(body)
+        environ["CONTENT_TYPE"] = "application/x-www-form-urlencoded"
+        environ["CONTENT_LENGTH"] = ""
+
+        result = {}
+
+        def start_response(status, headers):
+            result["status"] = status
+            result["headers"] = headers
+
+        chunks = self.app(environ, start_response)
+        result["body"] = b"".join(chunks).decode("utf-8")
+
+        self.assertTrue(result["status"].startswith("302"))
+        headers = dict(result["headers"])
+        self.assertEqual(headers.get("Location"), "/")
+
     def test_two_users_see_shared_task_completion(self):
         alex_cookie = ""
         sam_cookie = ""

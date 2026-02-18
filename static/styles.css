@@ -152,3 +152,59 @@ button.secondary {
   background: #ffe4e9;
   color: var(--danger);
 }
+
+
+.eyebrow {
+  display: inline-block;
+  margin: 0 0 0.4rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #5a2f96;
+  background: #efe5ff;
+}
+
+.auth-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-card::before {
+  content: "";
+  position: absolute;
+  inset: -120px -120px auto auto;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(105, 121, 255, 0.24), transparent 70%);
+  pointer-events: none;
+}
+
+button:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+button {
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.welcome-banner {
+  margin-bottom: 1rem;
+  border: 1px solid #f5d39f;
+  background: linear-gradient(135deg, #fff4de, #ffe9f8);
+  color: #7b3e00;
+  padding: 0.75rem 0.95rem;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+.status-list li {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.status-list li:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(41, 60, 115, 0.08);
+}

@@ -103,11 +103,20 @@ class TaskTrackerApp:
         return [b"Not found"]
 
     def parse_form(self, environ):
+        raw_length = environ.get("CONTENT_LENGTH", "")
+        body = b""
         try:
-            size = int(environ.get("CONTENT_LENGTH") or 0)
+            size = int(raw_length) if raw_length else 0
         except ValueError:
             size = 0
-        body = environ["wsgi.input"].read(size) if size > 0 else b""
+
+        if size > 0:
+            body = environ["wsgi.input"].read(size)
+        elif environ.get("REQUEST_METHOD") == "POST":
+            # Some reverse-proxy setups can forward POST bodies without CONTENT_LENGTH.
+            # Read until EOF so login still works in production.
+            body = environ["wsgi.input"].read()
+
         data = parse_qs(body.decode("utf-8")) if body else {}
         return {k: v[0] for k, v in data.items()}
 
@@ -219,6 +228,7 @@ class TaskTrackerApp:
             self.flash_html(flash_message)
             + """
             <section class=\"card auth-card\">
+              <p class=\"eyebrow\">✨ Welcome aboard</p>
               <h1>Monolith Task Tracker</h1>
               <p class=\"subtitle\">Log in as one of the two demo users to validate shared task completion.</p>
               <p class=\"subtitle\"><strong>New:</strong> UI smoke test build is active.</p>
@@ -248,6 +258,7 @@ class TaskTrackerApp:
             self.flash_html(flash_message)
             + f"""
             <section class=\"card\">
+              <div class=\"welcome-banner\">🎉 Great to see you! Let's make today productive.</div>
               <header class=\"dashboard-header\">
                 <div>
                   <h1>Welcome, {user['display_name']}</h1>
