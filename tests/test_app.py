@@ -60,7 +60,7 @@ class AppTests(unittest.TestCase):
     def test_login_works_without_content_length_header(self):
         environ = {}
         setup_testing_defaults(environ)
-        body = b"username=alex&password=pw"
+        body = b"username=alex&password=password123"
         environ["REQUEST_METHOD"] = "POST"
         environ["PATH_INFO"] = "/login"
         environ["wsgi.input"] = io.BytesIO(body)
@@ -88,7 +88,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/login",
-            body="username=alex&password=pw",
+            body="username=alex&password=password123",
         )
         alex_cookie = merge_cookies(alex_cookie, response["headers"])
 
@@ -96,7 +96,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/login",
-            body="username=sam&password=pw",
+            body="username=sam&password=password123",
         )
         sam_cookie = merge_cookies(sam_cookie, response["headers"])
 
@@ -117,7 +117,7 @@ class AppTests(unittest.TestCase):
     def test_logout_clears_session_and_allows_relogin(self):
         cookie = ""
 
-        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=pw")
+        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")
         cookie = merge_cookies(cookie, login["headers"])
 
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
@@ -131,7 +131,7 @@ class AppTests(unittest.TestCase):
         self.assertTrue(redirected["status"].startswith("302"))
         self.assertEqual(dict(redirected["headers"]).get("Location"), "/login")
 
-        relogin = call_app(self.app, method="POST", path="/login", body="username=sam&password=pw", cookie_header=cookie)
+        relogin = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123", cookie_header=cookie)
         self.assertTrue(relogin["status"].startswith("302"))
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 

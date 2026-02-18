@@ -61,8 +61,8 @@ class TaskTrackerApp:
             VALUES (?, ?, ?)
             """,
             [
-                ("alex", "Alex", hash_password("pw")),
-                ("sam", "Sam", hash_password("pw")),
+                ("alex", "Alex", hash_password("password123")),
+                ("sam", "Sam", hash_password("password123")),
             ],
         )
         db.executemany(
@@ -72,8 +72,8 @@ class TaskTrackerApp:
             WHERE username = ?
             """,
             [
-                (hash_password("pw"), "alex"),
-                (hash_password("pw"), "sam"),
+                (hash_password("password123"), "alex"),
+                (hash_password("password123"), "sam"),
             ],
         )
         db.execute(
@@ -253,11 +253,11 @@ class TaskTrackerApp:
               <p class=\"subtitle\"><strong>New:</strong> UI smoke test build is active.</p>
               <form method=\"post\" action=\"/login\" class=\"form-grid\">
                 <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex or sam\" required /></label>
-                <label>Password<input type=\"password\" name=\"password\" placeholder=\"pw\" required /></label>
+                <label>Password<input type=\"password\" name=\"password\" placeholder=\"password123\" required /></label>
                 <button type=\"submit\">Log In to Continue</button>
               </form>
               <div class=\"hint\"><strong>Demo accounts:</strong>
-                <ul><li><code>alex</code> / <code>pw</code></li><li><code>sam</code> / <code>pw</code></li></ul>
+                <ul><li><code>alex</code> / <code>password123</code></li><li><code>sam</code> / <code>password123</code></li></ul>
               </div>
             </section>
             """,
