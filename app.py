@@ -20,7 +20,12 @@ def hash_password(password: str) -> str:
 class TaskTrackerApp:
     def __init__(self, db_path: str | None = None, secret_key: str | None = None):
         self.db_path = db_path or str(DEFAULT_DB)
-        self.secret_key = (secret_key or os.environ.get("SECRET_KEY") or "dev-secret-change-me").encode("utf-8")
+        runtime_secret = secret_key or os.environ.get("SECRET_KEY")
+        if runtime_secret is None:
+            # Use an ephemeral default secret so stale session cookies from prior app
+            # runs are invalidated after a restart/redeploy.
+            runtime_secret = os.urandom(32).hex()
+        self.secret_key = runtime_secret.encode("utf-8")
         self.init_db()
 
     def init_db(self) -> None:
@@ -56,8 +61,19 @@ class TaskTrackerApp:
             VALUES (?, ?, ?)
             """,
             [
-                ("alex", "Alex", hash_password("password123")),
-                ("sam", "Sam", hash_password("password123")),
+                ("alex", "Alex", hash_password("pw")),
+                ("sam", "Sam", hash_password("pw")),
+            ],
+        )
+        db.executemany(
+            """
+            UPDATE users
+            SET password_hash = ?
+            WHERE username = ?
+            """,
+            [
+                (hash_password("pw"), "alex"),
+                (hash_password("pw"), "sam"),
             ],
         )
         db.execute(
@@ -206,7 +222,7 @@ class TaskTrackerApp:
     def handle_logout(self, start_response):
         headers = [
             ("Location", "/login"),
-            ("Set-Cookie", "session=; Path=/; HttpOnly; Max-Age=0"),
+            ("Set-Cookie", self.expire_cookie_header("session")),
             ("Set-Cookie", self.cookie_header("flash", self.sign("success:You have been logged out."))),
         ]
         start_response("302 Found", headers)
@@ -222,6 +238,9 @@ class TaskTrackerApp:
     def cookie_header(self, name: str, value: str):
         return f"{name}={value}; Path=/; HttpOnly; SameSite=Lax"
 
+    def expire_cookie_header(self, name: str):
+        return f"{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+
     def render_login(self, start_response, flash_message):
         html = self.html_page(
             "Monolith Task Tracker",
@@ -234,16 +253,16 @@ class TaskTrackerApp:
               <p class=\"subtitle\"><strong>New:</strong> UI smoke test build is active.</p>
               <form method=\"post\" action=\"/login\" class=\"form-grid\">
                 <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex or sam\" required /></label>
-                <label>Password<input type=\"password\" name=\"password\" placeholder=\"password123\" required /></label>
+                <label>Password<input type=\"password\" name=\"password\" placeholder=\"pw\" required /></label>
                 <button type=\"submit\">Log In to Continue</button>
               </form>
               <div class=\"hint\"><strong>Demo accounts:</strong>
-                <ul><li><code>alex</code> / <code>password123</code></li><li><code>sam</code> / <code>password123</code></li></ul>
+                <ul><li><code>alex</code> / <code>pw</code></li><li><code>sam</code> / <code>pw</code></li></ul>
               </div>
             </section>
             """,
         )
-        headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", "flash=; Path=/; HttpOnly; Max-Age=0")]
+        headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
         start_response("200 OK", headers)
         return [html.encode("utf-8")]
 
@@ -275,7 +294,7 @@ class TaskTrackerApp:
             </section>
             """,
         )
-        headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", "flash=; Path=/; HttpOnly; Max-Age=0")]
+        headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
         start_response("200 OK", headers)
         return [html.encode("utf-8")]
 

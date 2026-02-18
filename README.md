@@ -5,7 +5,7 @@ A simple monolith Python app with two login users. Each user can mark a shared t
 ## Features
 
 - Session-based login/logout.
-- Two seeded users (`alex`, `sam`) with password `password123`.
+- Two seeded users (`alex`, `sam`) with password `pw`.
 - One shared deployment-readiness task.
 - Shared completion status persisted in SQLite.
 - Clean, styled UI for demo/test flow.

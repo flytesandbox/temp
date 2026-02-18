@@ -60,7 +60,7 @@ class AppTests(unittest.TestCase):
     def test_login_works_without_content_length_header(self):
         environ = {}
         setup_testing_defaults(environ)
-        body = b"username=alex&password=password123"
+        body = b"username=alex&password=pw"
         environ["REQUEST_METHOD"] = "POST"
         environ["PATH_INFO"] = "/login"
         environ["wsgi.input"] = io.BytesIO(body)
@@ -88,7 +88,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/login",
-            body="username=alex&password=password123",
+            body="username=alex&password=pw",
         )
         alex_cookie = merge_cookies(alex_cookie, response["headers"])
 
@@ -96,7 +96,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/login",
-            body="username=sam&password=password123",
+            body="username=sam&password=pw",
         )
         sam_cookie = merge_cookies(sam_cookie, response["headers"])
 
@@ -113,6 +113,27 @@ class AppTests(unittest.TestCase):
 
         alex_dashboard = call_app(self.app, method="GET", path="/", cookie_header=alex_cookie)
         self.assertEqual(alex_dashboard["body"].count("Completed"), 2)
+
+    def test_logout_clears_session_and_allows_relogin(self):
+        cookie = ""
+
+        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=pw")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertTrue(dashboard["status"].startswith("200"))
+        self.assertIn("Welcome, Sam", dashboard["body"])
+
+        logout = call_app(self.app, method="POST", path="/logout", cookie_header=cookie)
+        cookie = merge_cookies(cookie, logout["headers"])
+
+        redirected = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertTrue(redirected["status"].startswith("302"))
+        self.assertEqual(dict(redirected["headers"]).get("Location"), "/login")
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=sam&password=pw", cookie_header=cookie)
+        self.assertTrue(relogin["status"].startswith("302"))
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
 
 if __name__ == "__main__":
