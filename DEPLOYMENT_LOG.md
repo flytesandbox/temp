@@ -4,6 +4,8 @@ This file is a **copy/paste checklist + command guide** to get this exact repo r
 
 ---
 
+> **Update:** Seeded default demo credentials now use password `password123` for both `alex` and `sam` (matching live deployment instructions).
+
 ## 0) What you are setting up (plain English)
 
 You will do 5 things:
