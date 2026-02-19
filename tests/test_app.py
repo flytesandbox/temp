@@ -58,7 +58,7 @@ class AppTests(unittest.TestCase):
 
     def test_regular_user_can_update_username_and_password(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         update = call_app(
@@ -75,7 +75,7 @@ class AppTests(unittest.TestCase):
 
     def test_regular_user_can_customize_dashboard_style(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         style = call_app(
@@ -93,14 +93,14 @@ class AppTests(unittest.TestCase):
 
     def test_super_admin_can_create_and_modify_users(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         create = call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=river&password=riverpass&role=user",
+            body="username=river&password=user&role=user",
             cookie_header=cookie,
         )
         self.assertEqual(dict(create["headers"]).get("Location"), "/")
@@ -117,12 +117,12 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(dict(update["headers"]).get("Location"), "/")
 
-        relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=riverpass")
+        relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
     def test_regular_user_cannot_create_or_modify_users(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         create = call_app(
@@ -142,7 +142,7 @@ class AppTests(unittest.TestCase):
     def test_login_session_cookie_allows_immediate_dashboard_access(self):
         cookie = ""
 
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         self.assertTrue(login["status"].startswith("302"))
         self.assertEqual(dict(login["headers"]).get("Location"), "/")
         cookie = merge_cookies(cookie, login["headers"])
@@ -153,7 +153,7 @@ class AppTests(unittest.TestCase):
 
     def test_non_employer_can_create_employer_from_onboarding_form(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         create = call_app(
@@ -178,7 +178,7 @@ class AppTests(unittest.TestCase):
 
     def test_employer_accounts_are_read_only_and_hidden_from_admin_features(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
         call_app(
             self.app,
@@ -200,7 +200,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/login",
-            body=f"username={employer_user['username']}&password=employer123",
+            body=f"username={employer_user['username']}&password=user",
         )
         employer_cookie = merge_cookies(employer_cookie, employer_login["headers"])
 
@@ -221,8 +221,8 @@ class AppTests(unittest.TestCase):
     def test_employer_visibility_is_limited_to_creator_scope(self):
         alex_cookie = ""
         sam_cookie = ""
-        alex_cookie = merge_cookies(alex_cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")["headers"])
-        sam_cookie = merge_cookies(sam_cookie, call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")["headers"])
+        alex_cookie = merge_cookies(alex_cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        sam_cookie = merge_cookies(sam_cookie, call_app(self.app, method="POST", path="/login", body="username=sam&password=user")["headers"])
 
         call_app(
             self.app,
@@ -258,7 +258,7 @@ class AppTests(unittest.TestCase):
                 self.app,
                 method="POST",
                 path="/login",
-                body=f"username={employer_user['username']}&password=employer123",
+                body=f"username={employer_user['username']}&password=user",
             )["headers"],
         )
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
@@ -269,34 +269,34 @@ class AppTests(unittest.TestCase):
 
     def test_super_admin_can_create_broker_accounts(self):
         cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         cookie = merge_cookies(cookie, login["headers"])
 
         create = call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=broker1&password=brokerpw&role=broker",
+            body="username=broker1&password=user&role=broker",
             cookie_header=cookie,
         )
         self.assertEqual(dict(create["headers"]).get("Location"), "/")
 
-        relogin = call_app(self.app, method="POST", path="/login", body="username=broker1&password=brokerpw")
+        relogin = call_app(self.app, method="POST", path="/login", body="username=broker1&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
     def test_broker_can_create_employer_and_owns_it(self):
         admin_cookie = ""
-        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
         call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=broker2&password=brokerpw&role=broker",
+            body="username=broker2&password=user&role=broker",
             cookie_header=admin_cookie,
         )
 
         broker_cookie = ""
-        broker_cookie = merge_cookies(broker_cookie, call_app(self.app, method="POST", path="/login", body="username=broker2&password=brokerpw")["headers"])
+        broker_cookie = merge_cookies(broker_cookie, call_app(self.app, method="POST", path="/login", body="username=broker2&password=user")["headers"])
         call_app(
             self.app,
             method="POST",
@@ -314,7 +314,7 @@ class AppTests(unittest.TestCase):
 
     def test_employer_can_mark_application_complete(self):
         cookie = ""
-        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")["headers"])
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
         call_app(
             self.app,
             method="POST",
@@ -332,7 +332,7 @@ class AppTests(unittest.TestCase):
         employer_cookie = ""
         employer_cookie = merge_cookies(
             employer_cookie,
-            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=employer123")["headers"],
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         call_app(
             self.app,
@@ -346,12 +346,12 @@ class AppTests(unittest.TestCase):
 
     def test_login_page_shows_db_backed_accounts_for_roles(self):
         admin_cookie = ""
-        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
         call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=brokerx&password=brokerpw&role=broker",
+            body="username=brokerx&password=user&role=broker",
             cookie_header=admin_cookie,
         )
 
@@ -363,7 +363,7 @@ class AppTests(unittest.TestCase):
 
     def test_super_admin_can_filter_logs_and_update_employer_settings(self):
         admin_cookie = ""
-        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
         call_app(
             self.app,
             method="POST",
@@ -386,17 +386,39 @@ class AppTests(unittest.TestCase):
             body=(
                 f"employer_id={employer['id']}&legal_name=Log+Target&contact_name=Taylor+Updated"
                 "&work_email=taylor%40log.com&phone=555-222&company_size=10-20&industry=Services"
-                "&website=https%3A%2F%2Flog.com&state=CO&onboarding_task=Collect+docs"
+                "&website=https%3A%2F%2Flog.com&state=CO&onboarding_task=Collect+docs&portal_username=logtarget1"
             ),
             cookie_header=admin_cookie,
         )
-        self.assertEqual(dict(update["headers"]).get("Location"), "/?view=employers")
+        self.assertEqual(dict(update["headers"]).get("Location"), f"/employers/settings?id={employer['id']}")
 
         logs_view = call_app(self.app, method="GET", path="/", query_string="view=logs&action=employer_updated", cookie_header=admin_cookie)
         self.assertIn("Admin Activity Log", logs_view["body"])
         self.assertIn("employer_updated", logs_view["body"])
         self.assertIn("Log Target", logs_view["body"])
 
+
+    def test_employer_list_links_to_settings_page(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Settings+Target&contact_name=Taylor&work_email=taylor%40settings.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Fsettings.com&state=CO"
+            ),
+            cookie_header=admin_cookie,
+        )
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=admin_cookie)
+        self.assertIn("/employers/settings?id=", dashboard["body"])
+
+    def test_logs_view_has_clear_filters_link(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        logs_view = call_app(self.app, method="GET", path="/", query_string="view=logs&action=login", cookie_header=admin_cookie)
+        self.assertIn("Clear Filters", logs_view["body"])
 
 if __name__ == "__main__":
     unittest.main()
