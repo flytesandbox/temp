@@ -76,6 +76,13 @@ class TaskTrackerApp:
                 created_by_user_id INTEGER NOT NULL,
                 broker_user_id INTEGER,
                 primary_user_id INTEGER,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+                ichra_start_date TEXT,
+                service_type TEXT,
+                claim_option TEXT,
+                agent_support TEXT,
+=======
+>>>>>>> main
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -160,6 +167,17 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
         if "primary_user_id" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN primary_user_id INTEGER")
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+        if "ichra_start_date" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN ichra_start_date TEXT")
+        if "service_type" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN service_type TEXT")
+        if "claim_option" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN claim_option TEXT")
+        if "agent_support" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN agent_support TEXT")
+=======
+>>>>>>> main
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -464,6 +482,28 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+    def get_assignable_primary_users(self, session_user):
+        db = self.db()
+        if session_user["role"] == "super_admin":
+            rows = db.execute(
+                "SELECT id, username, role FROM users WHERE role IN ('user', 'broker', 'super_admin') ORDER BY role, username"
+            ).fetchall()
+        elif session_user["role"] == "broker":
+            rows = db.execute(
+                "SELECT id, username, role FROM users WHERE id = ? OR (created_by_user_id = ? AND role = 'user') ORDER BY role, username",
+                (session_user["id"], session_user["id"]),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT id, username, role FROM users WHERE id = ? OR role = 'super_admin' ORDER BY role, username",
+                (session_user["id"],),
+            ).fetchall()
+        db.close()
+        return rows
+
+=======
+>>>>>>> main
     def list_notifications(self, user_id: int):
         db = self.db()
         rows = db.execute(
@@ -575,8 +615,14 @@ class TaskTrackerApp:
             """
             INSERT INTO employers (
                 legal_name, contact_name, work_email, phone, company_size,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id,
+                ichra_start_date, service_type, claim_option, agent_support
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+=======
                 industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+>>>>>>> main
             """,
             (
                 form["legal_name"].strip(),
@@ -593,6 +639,13 @@ class TaskTrackerApp:
                 creator_user_id,
                 broker_user_id,
                 primary_user_id,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+                form.get("ichra_start_date", "").strip(),
+                form.get("service_type", "").strip(),
+                form.get("claim_option", "").strip(),
+                form.get("agent_support", "").strip(),
+=======
+>>>>>>> main
             ),
         )
         db.commit()
@@ -601,11 +654,14 @@ class TaskTrackerApp:
 
     def update_employer_settings(self, employer_id: int, form: dict[str, str]):
         db = self.db()
+        broker_user_id = int(form["broker_user_id"]) if form.get("broker_user_id") else None
+        primary_user_id = int(form["primary_user_id"]) if form.get("primary_user_id") else None
         db.execute(
             """
             UPDATE employers
             SET legal_name = ?, contact_name = ?, work_email = ?, phone = ?,
-                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?
+                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?,
+                broker_user_id = ?, primary_user_id = ?
             WHERE id = ?
             """,
             (
@@ -618,6 +674,8 @@ class TaskTrackerApp:
                 form["website"],
                 form["state"],
                 form["onboarding_task"],
+                broker_user_id,
+                primary_user_id,
                 employer_id,
             ),
         )
@@ -758,7 +816,11 @@ class TaskTrackerApp:
     def handle_create_employer(self, start_response, session_user, form):
         if session_user["role"] == "employer":
             return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+        mode = form.get("setup_mode", "basic")
+=======
         mode = form.get("setup_mode", "ichra")
+>>>>>>> main
 
         if not form.get("contact_name", "").strip():
             primary_first = form.get("primary_first_name", "").strip()
@@ -772,8 +834,16 @@ class TaskTrackerApp:
         form["state"] = form.get("state") or form.get("physical_state", "")
 
         required = ["legal_name", "contact_name", "work_email", "phone", "company_size", "industry", "website", "state"]
+        if mode == "ichra":
+            required.extend(["ichra_start_date", "service_type", "claim_option", "agent_support"])
         if any(not form.get(name, "").strip() for name in required):
-            return self.redirect(start_response, "/?view=application", flash=("error", "Please complete all required application fields."))
+            return self.redirect(start_response, "/?view=application", flash=("error", "Please complete all required fields for the selected setup type."))
+
+        if mode == "basic":
+            form["ichra_start_date"] = ""
+            form["service_type"] = ""
+            form["claim_option"] = ""
+            form["agent_support"] = ""
 
         broker_user_id = session_user["id"] if session_user["role"] == "broker" else None
         username = self.create_employer(session_user["id"], form, broker_user_id=broker_user_id)
@@ -795,10 +865,46 @@ class TaskTrackerApp:
         if not employer:
             return self.redirect(start_response, "/?view=employers", flash=("error", "Employer not found for your access scope."))
 
-        required = ["legal_name", "contact_name", "work_email", "phone", "company_size", "industry", "website", "state", "onboarding_task", "portal_username"]
+        required = [
+            "legal_name",
+            "contact_name",
+            "work_email",
+            "phone",
+            "company_size",
+            "industry",
+            "website",
+            "state",
+            "onboarding_task",
+            "portal_username",
+        ]
         clean = {key: form.get(key, "").strip() for key in required}
         if any(not clean[key] for key in required):
             return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "All employer settings fields are required."))
+
+        broker_value = form.get("broker_user_id", "").strip()
+        if broker_value:
+            try:
+                int(broker_value)
+            except ValueError:
+                return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Invalid broker assignment."))
+        clean["broker_user_id"] = broker_value
+
+        primary_raw = form.get("primary_user_id", "").strip()
+        if not primary_raw:
+            primary_raw = str(employer["primary_user_id"] or "")
+        if not primary_raw:
+            return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Primary assignment is required."))
+
+        try:
+            primary_user_id = int(primary_raw)
+        except ValueError:
+            return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Invalid primary assignment."))
+
+        allowed_primary_ids = {row["id"] for row in self.get_assignable_primary_users(session_user)}
+        if primary_user_id not in allowed_primary_ids:
+            return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Selected primary is outside your allowed scope."))
+
+        clean["primary_user_id"] = str(primary_user_id)
 
         if len(clean["portal_username"]) < 3:
             return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Employer username must be at least 3 characters."))
@@ -895,6 +1001,27 @@ class TaskTrackerApp:
                 <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
               </div>
               <hr />
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+              <div class="welcome-cta">
+                <h2>New Employer Setup</h2>
+                <p class="subtitle">New here? Start with a short setup request and we’ll help you get enrolled.</p>
+                <button type="button" class="secondary" onclick="document.getElementById('signup-modal').showModal()">Start New Employer Setup</button>
+              </div>
+              <dialog id="signup-modal" class="signup-modal">
+                <form method="dialog" class="modal-close-row">
+                  <button class="secondary" type="submit">Close</button>
+                </form>
+                <h2>Welcome, future employer 👋</h2>
+                <p class="subtitle">Tell us about your company and we’ll get your basic employer profile started.</p>
+                <form method="post" action="/signup" class="form-grid">
+                  <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
+                  <label>Contact Name <input type="text" name="prospect_name" required /></label>
+                  <label>Work Email <input type="email" name="prospect_email" required /></label>
+                  <label>Phone <input type="text" name="prospect_phone" /></label>
+                  <button type="submit">Submit Employer Request</button>
+                </form>
+              </dialog>
+=======
               <h2>Prospective Employer Sign Up</h2>
               <p class="subtitle">Public form for employers needing a basic employer setup request.</p>
               <form method="post" action="/signup" class="form-grid">
@@ -904,6 +1031,7 @@ class TaskTrackerApp:
                 <label>Phone <input type="text" name="prospect_phone" /></label>
                 <button type="submit" class="secondary">Submit Employer Request</button>
               </form>
+>>>>>>> main
             </section>
             """
         html_doc = self.html_page("Monolith Task Tracker", html_body)
@@ -1222,10 +1350,19 @@ class TaskTrackerApp:
                 <option value='basic'>Basic Employer Setup</option>
               </select>
             </label>
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
+            <details class='field-log'>
+              <summary>Need only a basic employer profile?</summary>
+              <p>Choose <strong>Basic Employer Setup</strong> and complete only company information fields before submitting.</p>
+            </details>
+=======
+>>>>>>> main
             <h4>Desired ICHRA Start Date *</h4><input type='date' name='ichra_start_date' required />
-            <h4>Which service are you signing up for? *</h4>
-            <label><input type='radio' name='service_type' value='ICHRA Documents + Monthly Administration' required /> ICHRA Documents + Monthly Administration</label>
-            <label><input type='radio' name='service_type' value='ICHRA Documents Only' /> ICHRA Documents Only</label>
+            <div class='ichra-only'>
+              <h4>Which service are you signing up for? *</h4>
+              <label><input type='radio' name='service_type' value='ICHRA Documents + Monthly Administration' required /> ICHRA Documents + Monthly Administration</label>
+              <label><input type='radio' name='service_type' value='ICHRA Documents Only' /> ICHRA Documents Only</label>
+            </div>
 
             <h4>Primary and ICHRA Setup Contact</h4>
             <label>Primary Contact First Name *<input name='primary_first_name' required /></label>
@@ -1271,22 +1408,24 @@ class TaskTrackerApp:
             <label>Mailing Zip Code<input name='mailing_zip' /></label>
             <label>Other participating entities/companies<input name='participating_entities' /></label>
 
-            <h4>ICHRA Setup - Step 1 of 4 - Reimbursements</h4>
-            <label>Which reimbursement option do you want to offer? *<input name='reimbursement_option' required /></label>
+            <div class='ichra-only'>
+              <h4>ICHRA Setup - Step 1 of 4 - Reimbursements</h4>
+              <label>Which reimbursement option do you want to offer? *<input name='reimbursement_option' required /></label>
 
-            <h4>ICHRA Setup - 2 of 4 - Eligibility</h4>
-            <label>Do you need assistance with employee classes? *<input name='employee_class_assistance' required /></label>
-            <label>New hire eligibility period *<input name='new_hire_eligibility_period' required /></label>
+              <h4>ICHRA Setup - 2 of 4 - Eligibility</h4>
+              <label>Do you need assistance with employee classes? *<input name='employee_class_assistance' required /></label>
+              <label>New hire eligibility period *<input name='new_hire_eligibility_period' required /></label>
 
-            <h4>ICHRA Setup - 3 of 4 - Contributions</h4>
-            <label>What are you planning to contribute? *<input name='planned_contribution' required /></label>
-            <label>Spouse/Dependent/Family contributions<input name='dependent_contributions' /></label>
+              <h4>ICHRA Setup - 3 of 4 - Contributions</h4>
+              <label>What are you planning to contribute? *<input name='planned_contribution' required /></label>
+              <label>Spouse/Dependent/Family contributions<input name='dependent_contributions' /></label>
 
-            <h4>ICHRA Setup - 4 of 4 - Claim Options</h4>
-            <label>Which claim option would you like to use? *<input name='claim_option' required /></label>
+              <h4>ICHRA Setup - 4 of 4 - Claim Options</h4>
+              <label>Which claim option would you like to use? *<input name='claim_option' required /></label>
 
-            <h4>Agent Information</h4>
-            <label>Are you working with a health insurance agent? *<input name='agent_support' required /></label>
+              <h4>Agent Information</h4>
+              <label>Are you working with a health insurance agent? *<input name='agent_support' required /></label>
+            </div>
 
             <h4>Plan Fee and Ongoing Reimbursements</h4>
             <label>Please upload completed Bank Authorization (for reference only in this demo)<input type='file' name='bank_authorization_upload' /></label>
@@ -1301,30 +1440,72 @@ class TaskTrackerApp:
             participating entities, reimbursement setup, eligibility, contributions, claim options, agent details, bank authorization upload, terms acceptance,
             final questions, and submit action.</p>
           </details>
+          <script>
+            (function () {
+              const form = document.currentScript.closest('section').querySelector('form');
+              const modeSelect = form.querySelector("select[name='setup_mode']");
+              const ichraBlocks = form.querySelectorAll('.ichra-only');
+              const toggle = () => {
+                const basic = modeSelect.value === 'basic';
+                ichraBlocks.forEach((el) => {
+                  el.style.display = basic ? 'none' : 'block';
+                  el.querySelectorAll('input').forEach((input) => {
+                    if (input.name === 'service_type' || input.name === 'claim_option' || input.name === 'agent_support') {
+                      input.required = !basic;
+                    }
+                  });
+                });
+              };
+              modeSelect.addEventListener('change', toggle);
+              toggle();
+            })();
+          </script>
         </section>
         """
 
     def render_employer_settings_link(self, employer_row, role: str) -> str:
         if role not in {"super_admin", "broker", "user"}:
             return "<span class='subtitle'>Read-only</span>"
-        return f"<a class='nav-link' href='/employers/settings?id={employer_row['id']}'>Open settings</a>"
+        return f"<a class='settings-link' href='/employers/settings?id={employer_row['id']}'>Open settings</a>"
 
     def render_employer_settings_page(self, start_response, session_user, employer_id: int, flash_message):
         employer = self.get_visible_employer_by_id(session_user, employer_id)
         if not employer:
             return self.redirect(start_response, "/?view=employers", flash=("error", "Employer not found for your access scope."))
 
+        broker_options = "".join(
+            f"<option value='{row['id']}' {'selected' if employer['broker_user_id'] == row['id'] else ''}>{html.escape(row['username'])}</option>"
+            for row in self.get_manageable_brokers(session_user)
+        )
+        primary_options = "".join(
+            f"<option value='{row['id']}' {'selected' if employer['primary_user_id'] == row['id'] else ''}>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
+            for row in self.get_assignable_primary_users(session_user)
+        )
+
         body = self.flash_html(flash_message) + f"""
             <section class='card dashboard role-{session_user['role']} theme-{session_user['theme']} density-{session_user['density']}'>
               <header class='dashboard-header'>
                 <div>
-                  <h1>Employer Settings</h1>
-                  <p class='subtitle'>Update company profile and employer portal login details.</p>
+                  <h1>Employer Settings Dashboard</h1>
+                  <p class='subtitle'>Company profile, assignments, and ICHRA setup details in one place.</p>
                 </div>
                 <a class='nav-link' href='/?view=employers'>Back to Employers</a>
               </header>
-              <section class='section-block'>
-                {self.render_employer_edit_form(employer)}
+              <section class='section-block settings-dashboard-grid'>
+                <article class='task-card'>
+                  <h3>Company Data</h3>
+                  {self.render_employer_edit_form(employer, broker_options, primary_options)}
+                </article>
+                <article class='task-card'>
+                  <h3>ICHRA Application Data</h3>
+                  <div class='details-grid'>
+                    <p><strong>ICHRA Start Date:</strong> {html.escape(employer['ichra_start_date'] or 'Not provided')}</p>
+                    <p><strong>Service Type:</strong> {html.escape(employer['service_type'] or 'Not provided')}</p>
+                    <p><strong>Claim Option:</strong> {html.escape(employer['claim_option'] or 'Not provided')}</p>
+                    <p><strong>Agent Support:</strong> {html.escape(employer['agent_support'] or 'Not provided')}</p>
+                    <p><strong>Application Status:</strong> {'Complete' if employer['application_complete'] else 'In progress'}</p>
+                  </div>
+                </article>
               </section>
             </section>
         """
@@ -1333,7 +1514,7 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_employer_edit_form(self, employer_row) -> str:
+    def render_employer_edit_form(self, employer_row, broker_options: str, primary_options: str) -> str:
         return f"""
         <form method='post' action='/employers/update' class='form-grid employer-settings-form'>
           <input type='hidden' name='employer_id' value='{employer_row['id']}' />
@@ -1345,6 +1526,17 @@ class TaskTrackerApp:
           <label>Industry<input name='industry' value='{html.escape(employer_row['industry'])}' required /></label>
           <label>Website<input name='website' value='{html.escape(employer_row['website'])}' required /></label>
           <label>State<input name='state' value='{html.escape(employer_row['state'])}' required /></label>
+          <label>Assigned Broker
+            <select name='broker_user_id'>
+              <option value=''>Unassigned</option>
+              {broker_options}
+            </select>
+          </label>
+          <label>Primary Owner *
+            <select name='primary_user_id' required>
+              {primary_options}
+            </select>
+          </label>
           <label>Onboarding Task<textarea name='onboarding_task' required>{html.escape(employer_row['onboarding_task'])}</textarea></label>
           <label>Portal Username<input name='portal_username' value='{html.escape(employer_row['portal_username'])}' required minlength='3' /></label>
           <label>Portal Password<input name='portal_password' type='password' placeholder='leave blank to keep current password' /></label>
