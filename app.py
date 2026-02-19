@@ -11,6 +11,7 @@ from wsgiref.simple_server import make_server
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "app.db"
+PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 
 
 def hash_password(password: str) -> str:
@@ -20,11 +21,7 @@ def hash_password(password: str) -> str:
 class TaskTrackerApp:
     def __init__(self, db_path: str | None = None, secret_key: str | None = None):
         self.db_path = db_path or str(DEFAULT_DB)
-        runtime_secret = secret_key or os.environ.get("SECRET_KEY")
-        if runtime_secret is None:
-            # Use an ephemeral default secret so stale session cookies from prior app
-            # runs are invalidated after a restart/redeploy.
-            runtime_secret = os.urandom(32).hex()
+        runtime_secret = secret_key or PROCESS_SECRET_KEY
         self.secret_key = runtime_secret.encode("utf-8")
         self.init_db()
 
