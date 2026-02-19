@@ -22,7 +22,7 @@ body {
 }
 
 .container {
-  width: min(850px, 94vw);
+  width: min(960px, 94vw);
   margin: 2rem auto;
 }
 
@@ -55,11 +55,13 @@ label {
   font-weight: 600;
 }
 
-input {
+input,
+select {
   border: 1px solid #cbd6ff;
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
   font-size: 1rem;
+  background: #fff;
 }
 
 button {
@@ -153,7 +155,6 @@ button.secondary {
   color: var(--danger);
 }
 
-
 .eyebrow {
   display: inline-block;
   margin: 0 0 0.4rem;
@@ -207,4 +208,72 @@ button {
 .status-list li:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 20px rgba(41, 60, 115, 0.08);
+}
+
+.section-block {
+  margin-top: 1.4rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.9rem;
+}
+
+.user-table th,
+.user-table td {
+  border-bottom: 1px solid #e3e9ff;
+  padding: 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dashboard.theme-sunset {
+  background: linear-gradient(180deg, #fff6ed, #fff);
+}
+
+.dashboard.theme-midnight {
+  background: linear-gradient(180deg, #1d2748, #10182f);
+  color: #eef2ff;
+}
+
+.dashboard.theme-midnight .subtitle,
+.dashboard.theme-midnight small {
+  color: #c5d1ff;
+}
+
+.dashboard.theme-midnight .task-card,
+.dashboard.theme-midnight .status-list li,
+.dashboard.theme-midnight input,
+.dashboard.theme-midnight select {
+  background: #1a2443;
+  border-color: #36487f;
+  color: #eef2ff;
+}
+
+.dashboard.density-compact {
+  font-size: 0.95rem;
+}
+
+.dashboard.density-compact .task-card,
+.dashboard.density-compact .status-list li,
+.dashboard.density-compact .card,
+.dashboard.density-compact input,
+.dashboard.density-compact select,
+.dashboard.density-compact button {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }

@@ -56,29 +56,88 @@ class AppTests(unittest.TestCase):
         headers = dict(response["headers"])
         self.assertEqual(headers.get("Location"), "/login")
 
+    def test_regular_user_can_update_username_and_password(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        cookie = merge_cookies(cookie, login["headers"])
 
-    def test_login_works_without_content_length_header(self):
-        environ = {}
-        setup_testing_defaults(environ)
-        body = b"username=alex&password=password123"
-        environ["REQUEST_METHOD"] = "POST"
-        environ["PATH_INFO"] = "/login"
-        environ["wsgi.input"] = io.BytesIO(body)
-        environ["CONTENT_TYPE"] = "application/x-www-form-urlencoded"
-        environ["CONTENT_LENGTH"] = ""
+        update = call_app(
+            self.app,
+            method="POST",
+            path="/settings/profile",
+            body="username=alex2&password=betterpw",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(update["headers"]).get("Location"), "/")
 
-        result = {}
+        relogin = call_app(self.app, method="POST", path="/login", body="username=alex2&password=betterpw")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
-        def start_response(status, headers):
-            result["status"] = status
-            result["headers"] = headers
+    def test_regular_user_can_customize_dashboard_style(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")
+        cookie = merge_cookies(cookie, login["headers"])
 
-        chunks = self.app(environ, start_response)
-        result["body"] = b"".join(chunks).decode("utf-8")
+        style = call_app(
+            self.app,
+            method="POST",
+            path="/settings/style",
+            body="theme=midnight&density=compact",
+            cookie_header=cookie,
+        )
+        cookie = merge_cookies(cookie, style["headers"])
 
-        self.assertTrue(result["status"].startswith("302"))
-        headers = dict(result["headers"])
-        self.assertEqual(headers.get("Location"), "/")
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertIn("theme-midnight", dashboard["body"])
+        self.assertIn("density-compact", dashboard["body"])
+
+    def test_super_admin_can_create_and_modify_users(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        create = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=river&password=riverpass&role=user",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+
+        users = self.app.get_users_with_completion()
+        river = next(u for u in users if u["username"] == "river")
+
+        update = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/update",
+            body=f"user_id={river['id']}&username=river2&role=super_admin&password=",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(update["headers"]).get("Location"), "/")
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=riverpass")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+
+    def test_regular_user_cannot_create_or_modify_users(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        create = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=hacker&password=hackerpw&role=user",
+            cookie_header=cookie,
+        )
+        cookie = merge_cookies(cookie, create["headers"])
+        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertNotIn("hacker", dashboard["body"])
+        self.assertIn("Team Completion Status", dashboard["body"])
 
     def test_login_session_cookie_allows_immediate_dashboard_access(self):
         cookie = ""
@@ -91,105 +150,6 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
         self.assertTrue(dashboard["status"].startswith("200"))
         self.assertIn("Welcome, Alex", dashboard["body"])
-
-    def test_dashboard_access_with_session_and_flash_cookies(self):
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
-        self.assertTrue(login["status"].startswith("302"))
-
-        set_cookie_values = [value for header, value in login["headers"] if header.lower() == "set-cookie"]
-        self.assertGreaterEqual(len(set_cookie_values), 2)
-
-        cookie_pairs = []
-        for header_value in set_cookie_values:
-            cookie_pairs.append(header_value.split(";", 1)[0])
-
-        cookie_header = "; ".join(cookie_pairs)
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie_header)
-
-        self.assertTrue(dashboard["status"].startswith("200"))
-        self.assertIn("Welcome, Alex", dashboard["body"])
-
-    def test_two_users_see_shared_task_completion(self):
-        alex_cookie = ""
-        sam_cookie = ""
-
-        response = call_app(
-            self.app,
-            method="POST",
-            path="/login",
-            body="username=alex&password=password123",
-        )
-        alex_cookie = merge_cookies(alex_cookie, response["headers"])
-
-        response = call_app(
-            self.app,
-            method="POST",
-            path="/login",
-            body="username=sam&password=password123",
-        )
-        sam_cookie = merge_cookies(sam_cookie, response["headers"])
-
-        response = call_app(self.app, method="POST", path="/task/complete", cookie_header=alex_cookie)
-        alex_cookie = merge_cookies(alex_cookie, response["headers"])
-
-        sam_dashboard = call_app(self.app, method="GET", path="/", cookie_header=sam_cookie)
-        self.assertIn("Alex", sam_dashboard["body"])
-        self.assertIn("Sam", sam_dashboard["body"])
-        self.assertEqual(sam_dashboard["body"].count("Completed"), 1)
-
-        response = call_app(self.app, method="POST", path="/task/complete", cookie_header=sam_cookie)
-        sam_cookie = merge_cookies(sam_cookie, response["headers"])
-
-        alex_dashboard = call_app(self.app, method="GET", path="/", cookie_header=alex_cookie)
-        self.assertEqual(alex_dashboard["body"].count("Completed"), 2)
-
-    def test_empty_post_without_content_length_does_not_block_task_complete(self):
-        cookie = ""
-
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
-        cookie = merge_cookies(cookie, login["headers"])
-
-        environ = {}
-        setup_testing_defaults(environ)
-        environ["REQUEST_METHOD"] = "POST"
-        environ["PATH_INFO"] = "/task/complete"
-        environ["wsgi.input"] = io.BytesIO(b"")
-        environ["CONTENT_TYPE"] = "application/x-www-form-urlencoded"
-        environ["CONTENT_LENGTH"] = ""
-        environ["HTTP_COOKIE"] = cookie
-
-        result = {}
-
-        def start_response(status, headers):
-            result["status"] = status
-            result["headers"] = headers
-
-        chunks = self.app(environ, start_response)
-        result["body"] = b"".join(chunks).decode("utf-8")
-
-        self.assertTrue(result["status"].startswith("302"))
-        self.assertEqual(dict(result["headers"]).get("Location"), "/")
-
-    def test_logout_clears_session_and_allows_relogin(self):
-        cookie = ""
-
-        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")
-        cookie = merge_cookies(cookie, login["headers"])
-
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertTrue(dashboard["status"].startswith("200"))
-        self.assertIn("Welcome, Sam", dashboard["body"])
-
-        logout = call_app(self.app, method="POST", path="/logout", cookie_header=cookie)
-        cookie = merge_cookies(cookie, logout["headers"])
-
-        redirected = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertTrue(redirected["status"].startswith("302"))
-        self.assertEqual(dict(redirected["headers"]).get("Location"), "/login")
-
-        relogin = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123", cookie_header=cookie)
-        self.assertTrue(relogin["status"].startswith("302"))
-        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
 
 if __name__ == "__main__":

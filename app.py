@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import os
 import sqlite3
 from http import cookies
@@ -12,6 +13,8 @@ from wsgiref.simple_server import make_server
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "app.db"
 PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
+ALLOWED_THEMES = {"default", "sunset", "midnight"}
+ALLOWED_DENSITIES = {"comfortable", "compact"}
 
 
 def hash_password(password: str) -> str:
@@ -33,7 +36,10 @@ class TaskTrackerApp:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
-                password_hash TEXT NOT NULL
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                theme TEXT NOT NULL DEFAULT 'default',
+                density TEXT NOT NULL DEFAULT 'comfortable'
             );
 
             CREATE TABLE IF NOT EXISTS tasks (
@@ -52,14 +58,23 @@ class TaskTrackerApp:
             """
         )
 
+        columns = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
+        if "role" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        if "theme" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default'")
+        if "density" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN density TEXT NOT NULL DEFAULT 'comfortable'")
+
         db.executemany(
             """
-            INSERT OR IGNORE INTO users (username, display_name, password_hash)
-            VALUES (?, ?, ?)
+            INSERT OR IGNORE INTO users (username, display_name, password_hash, role)
+            VALUES (?, ?, ?, ?)
             """,
             [
-                ("alex", "Alex", hash_password("password123")),
-                ("sam", "Sam", hash_password("password123")),
+                ("alex", "Alex", hash_password("password123"), "user"),
+                ("sam", "Sam", hash_password("password123"), "user"),
+                ("admin", "Super Admin", hash_password("admin123"), "super_admin"),
             ],
         )
         db.executemany(
@@ -71,8 +86,10 @@ class TaskTrackerApp:
             [
                 (hash_password("password123"), "alex"),
                 (hash_password("password123"), "sam"),
+                (hash_password("admin123"), "admin"),
             ],
         )
+        db.execute("UPDATE users SET role = 'super_admin' WHERE username = 'admin'")
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -111,6 +128,30 @@ class TaskTrackerApp:
             self.complete_for_user(session_user["id"], 1)
             return self.redirect(start_response, "/", flash=("success", "Task marked complete. Everyone can now see your status."))
 
+        if path == "/settings/profile" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_profile_settings(start_response, session_user, self.parse_form(environ))
+
+        if path == "/settings/style" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_style_settings(start_response, session_user, self.parse_form(environ))
+
+        if path == "/admin/users/create" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "super_admin":
+                return self.redirect(start_response, "/", flash=("error", "Only the super admin can create users."))
+            return self.handle_admin_create_user(start_response, self.parse_form(environ))
+
+        if path == "/admin/users/update" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "super_admin":
+                return self.redirect(start_response, "/", flash=("error", "Only the super admin can modify users."))
+            return self.handle_admin_update_user(start_response, self.parse_form(environ))
+
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found"]
 
@@ -131,8 +172,6 @@ class TaskTrackerApp:
         if size > 0:
             body = environ["wsgi.input"].read(size)
         elif environ.get("REQUEST_METHOD") == "POST":
-            # Some reverse-proxy setups can forward POST bodies without CONTENT_LENGTH.
-            # Read until EOF so login still works in production.
             body = environ["wsgi.input"].read()
 
         data = parse_qs(body.decode("utf-8")) if body else {}
@@ -159,7 +198,7 @@ class TaskTrackerApp:
         db = self.db()
         rows = db.execute(
             """
-            SELECT u.id, u.display_name,
+            SELECT u.id, u.username, u.display_name, u.role,
                    CASE WHEN tc.id IS NULL THEN 0 ELSE 1 END AS completed
             FROM users u
             LEFT JOIN task_completions tc
@@ -179,6 +218,46 @@ class TaskTrackerApp:
         db.commit()
         db.close()
 
+    def update_user_profile(self, user_id: int, username: str, password: str):
+        db = self.db()
+        current = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        new_password = hash_password(password) if password else current["password_hash"]
+        db.execute(
+            "UPDATE users SET username = ?, display_name = ?, password_hash = ? WHERE id = ?",
+            (username, username.capitalize(), new_password, user_id),
+        )
+        db.commit()
+        db.close()
+
+    def update_user_style(self, user_id: int, theme: str, density: str):
+        db = self.db()
+        db.execute("UPDATE users SET theme = ?, density = ? WHERE id = ?", (theme, density, user_id))
+        db.commit()
+        db.close()
+
+    def create_user(self, username: str, password: str, role: str):
+        db = self.db()
+        db.execute(
+            "INSERT INTO users (username, display_name, password_hash, role) VALUES (?, ?, ?, ?)",
+            (username, username.capitalize(), hash_password(password), role),
+        )
+        db.commit()
+        db.close()
+
+    def admin_update_user(self, user_id: int, username: str, role: str, password: str):
+        db = self.db()
+        user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            db.close()
+            raise ValueError("User not found")
+        password_hash = hash_password(password) if password else user["password_hash"]
+        db.execute(
+            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ? WHERE id = ?",
+            (username, username.capitalize(), role, password_hash, user_id),
+        )
+        db.commit()
+        db.close()
+
     def sign(self, value: str) -> str:
         sig = hmac.new(self.secret_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
         return f"{value}|{sig}"
@@ -191,11 +270,7 @@ class TaskTrackerApp:
         return raw if hmac.compare_digest(sig, expected) else None
 
     def read_session_user(self, cookie: cookies.SimpleCookie):
-        if os.environ.get("DEBUG_AUTH") == "1":
-            print(f"DEBUG_AUTH: HTTP_COOKIE present={bool(cookie)}")
         signed = cookie.get("session")
-        if os.environ.get("DEBUG_AUTH") == "1":
-            print(f"DEBUG_AUTH: session cookie parsed={bool(signed)}")
         if not signed:
             return None
         raw = self.unsign(signed.value)
@@ -224,6 +299,64 @@ class TaskTrackerApp:
         ]
         start_response("302 Found", headers)
         return [b""]
+
+    def handle_profile_settings(self, start_response, session_user, form):
+        username = form.get("username", "").strip().lower()
+        password = form.get("password", "")
+
+        if len(username) < 3:
+            return self.redirect(start_response, "/", flash=("error", "Username must be at least 3 characters."))
+        if password and len(password) < 6:
+            return self.redirect(start_response, "/", flash=("error", "Password must be at least 6 characters."))
+
+        try:
+            self.update_user_profile(session_user["id"], username, password)
+        except sqlite3.IntegrityError:
+            return self.redirect(start_response, "/", flash=("error", "That username is already in use."))
+        return self.redirect(start_response, "/", flash=("success", "Profile updated."))
+
+    def handle_style_settings(self, start_response, session_user, form):
+        theme = form.get("theme", "default")
+        density = form.get("density", "comfortable")
+        if theme not in ALLOWED_THEMES or density not in ALLOWED_DENSITIES:
+            return self.redirect(start_response, "/", flash=("error", "Invalid style settings."))
+        self.update_user_style(session_user["id"], theme, density)
+        return self.redirect(start_response, "/", flash=("success", "Dashboard style saved."))
+
+    def handle_admin_create_user(self, start_response, form):
+        username = form.get("username", "").strip().lower()
+        password = form.get("password", "")
+        role = form.get("role", "user")
+        if role not in {"user", "super_admin"}:
+            role = "user"
+        if len(username) < 3 or len(password) < 6:
+            return self.redirect(start_response, "/", flash=("error", "New users need a username (3+) and password (6+)."))
+        try:
+            self.create_user(username, password, role)
+        except sqlite3.IntegrityError:
+            return self.redirect(start_response, "/", flash=("error", "Unable to create user. Username may already exist."))
+        return self.redirect(start_response, "/", flash=("success", "User created."))
+
+    def handle_admin_update_user(self, start_response, form):
+        try:
+            user_id = int(form.get("user_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/", flash=("error", "Invalid user selected."))
+        username = form.get("username", "").strip().lower()
+        role = form.get("role", "user")
+        password = form.get("password", "")
+        if role not in {"user", "super_admin"}:
+            role = "user"
+        if len(username) < 3:
+            return self.redirect(start_response, "/", flash=("error", "Username must be at least 3 characters."))
+
+        try:
+            self.admin_update_user(user_id, username, role, password)
+        except ValueError:
+            return self.redirect(start_response, "/", flash=("error", "User no longer exists."))
+        except sqlite3.IntegrityError:
+            return self.redirect(start_response, "/", flash=("error", "Cannot update user to that username."))
+        return self.redirect(start_response, "/", flash=("success", "User updated."))
 
     def handle_logout(self, start_response):
         headers = [
@@ -262,61 +395,146 @@ class TaskTrackerApp:
         return morsel.OutputString()
 
     def render_login(self, start_response, flash_message):
-        html = self.html_page(
-            "Monolith Task Tracker",
-            self.flash_html(flash_message)
-            + """
+        html_body = self.flash_html(flash_message) + """
             <section class=\"card auth-card\">
               <p class=\"eyebrow\">✨ Welcome aboard</p>
               <h1>Monolith Task Tracker</h1>
-              <p class=\"subtitle\">Log in as one of the two demo users to validate shared task completion.</p>
-              <p class=\"subtitle\"><strong>New:</strong> UI smoke test build is active.</p>
+              <p class=\"subtitle\">Log in with a user account or the super admin account.</p>
               <form method=\"post\" action=\"/login\" class=\"form-grid\">
-                <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex or sam\" required /></label>
-                <label>Password<input type=\"password\" name=\"password\" placeholder=\"password123\" required /></label>
+                <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex, sam, or admin\" required /></label>
+                <label>Password<input type=\"password\" name=\"password\" placeholder=\"password\" required /></label>
                 <button type=\"submit\">Log In to Continue</button>
               </form>
               <div class=\"hint\"><strong>Demo accounts:</strong>
-                <ul><li><code>alex</code> / <code>password123</code></li><li><code>sam</code> / <code>password123</code></li></ul>
+                <ul>
+                  <li><code>alex</code> / <code>password123</code></li>
+                  <li><code>sam</code> / <code>password123</code></li>
+                  <li><code>admin</code> / <code>admin123</code> (super admin)</li>
+                </ul>
               </div>
             </section>
-            """,
-        )
+            """
+        html_doc = self.html_page("Monolith Task Tracker", html_body)
         headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
         start_response("200 OK", headers)
-        return [html.encode("utf-8")]
+        return [html_doc.encode("utf-8")]
 
     def render_dashboard(self, start_response, user, flash_message):
         rows = self.get_users_with_completion()
         status_rows = "".join(
-            f"<li><span>{row['display_name']}</span><span class='pill {'complete' if row['completed'] else 'pending'}'>{'Completed' if row['completed'] else 'Pending'}</span></li>"
+            (
+                f"<li><span>{html.escape(row['display_name'])}"
+                f" <small>({html.escape(row['username'])})</small></span>"
+                f"<span class='pill {'complete' if row['completed'] else 'pending'}'>"
+                f"{'Completed' if row['completed'] else 'Pending'}</span></li>"
+            )
             for row in rows
         )
-        html = self.html_page(
-            "Dashboard",
-            self.flash_html(flash_message)
-            + f"""
-            <section class=\"card\">
+
+        admin_section = ""
+        if user["role"] == "super_admin":
+            user_rows = "".join(
+                f"""
+                <tr>
+                  <td>{html.escape(row['username'])}</td>
+                  <td>{html.escape(row['role'])}</td>
+                  <td>
+                    <form method='post' action='/admin/users/update' class='inline-form'>
+                      <input type='hidden' name='user_id' value='{row['id']}' />
+                      <input name='username' value='{html.escape(row['username'])}' required minlength='3' />
+                      <select name='role'>
+                        <option value='user' {'selected' if row['role'] == 'user' else ''}>user</option>
+                        <option value='super_admin' {'selected' if row['role'] == 'super_admin' else ''}>super_admin</option>
+                      </select>
+                      <input name='password' type='password' placeholder='new password (optional)' />
+                      <button type='submit' class='secondary'>Save</button>
+                    </form>
+                  </td>
+                </tr>
+                """
+                for row in rows
+            )
+            admin_section = f"""
+              <section class='section-block'>
+                <h3>Super Admin · User Management</h3>
+                <form method='post' action='/admin/users/create' class='inline-form'>
+                  <input name='username' placeholder='new username' required minlength='3' />
+                  <input name='password' type='password' placeholder='new password' required minlength='6' />
+                  <select name='role'>
+                    <option value='user'>user</option>
+                    <option value='super_admin'>super_admin</option>
+                  </select>
+                  <button type='submit'>Create User</button>
+                </form>
+                <table class='user-table'>
+                  <thead><tr><th>Username</th><th>Role</th><th>Modify</th></tr></thead>
+                  <tbody>{user_rows}</tbody>
+                </table>
+              </section>
+            """
+
+        html_body = self.flash_html(flash_message) + f"""
+            <section class=\"card dashboard theme-{user['theme']} density-{user['density']}\">
               <div class=\"welcome-banner\">🎉 Great to see you! Let's make today productive.</div>
               <header class=\"dashboard-header\">
                 <div>
-                  <h1>Welcome, {user['display_name']}</h1>
+                  <h1>Welcome, {html.escape(user['display_name'])}</h1>
                   <p class=\"subtitle\">Track shared progress for deployment validation.</p>
                 </div>
                 <form method=\"post\" action=\"/logout\"><button class=\"secondary\" type=\"submit\">Log Out</button></form>
               </header>
+
               <article class=\"task-card\">
                 <h2>Deployment Readiness Task</h2>
                 <p>Confirm the app works in Codespaces and on Linode.</p>
                 <form method=\"post\" action=\"/task/complete\"><button type=\"submit\">Mark My Task Complete</button></form>
               </article>
-              <section><h3>Team Completion Status</h3><ul class=\"status-list\">{status_rows}</ul></section>
+
+              <section class='section-block'>
+                <h3>Team Completion Status</h3>
+                <ul class=\"status-list\">{status_rows}</ul>
+              </section>
+
+              <section class='section-block settings-grid'>
+                <div>
+                  <h3>User Settings</h3>
+                  <form method='post' action='/settings/profile' class='form-grid'>
+                    <label>Change Username
+                      <input type='text' name='username' value='{html.escape(user['username'])}' required minlength='3' />
+                    </label>
+                    <label>Change Password
+                      <input type='password' name='password' placeholder='leave blank to keep current password' />
+                    </label>
+                    <button type='submit'>Save Account Settings</button>
+                  </form>
+                </div>
+                <div>
+                  <h3>Dashboard Styling</h3>
+                  <form method='post' action='/settings/style' class='form-grid'>
+                    <label>Theme
+                      <select name='theme'>
+                        <option value='default' {'selected' if user['theme'] == 'default' else ''}>Default</option>
+                        <option value='sunset' {'selected' if user['theme'] == 'sunset' else ''}>Sunset</option>
+                        <option value='midnight' {'selected' if user['theme'] == 'midnight' else ''}>Midnight</option>
+                      </select>
+                    </label>
+                    <label>Density
+                      <select name='density'>
+                        <option value='comfortable' {'selected' if user['density'] == 'comfortable' else ''}>Comfortable</option>
+                        <option value='compact' {'selected' if user['density'] == 'compact' else ''}>Compact</option>
+                      </select>
+                    </label>
+                    <button type='submit'>Apply Styling</button>
+                  </form>
+                </div>
+              </section>
+              {admin_section}
             </section>
-            """,
-        )
+            """
+        html_doc = self.html_page("Dashboard", html_body)
         headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
         start_response("200 OK", headers)
-        return [html.encode("utf-8")]
+        return [html_doc.encode("utf-8")]
 
     def serve_static(self, path: str, start_response):
         file_path = BASE_DIR / path.lstrip("/")
@@ -332,7 +550,7 @@ class TaskTrackerApp:
         if not flash_message:
             return ""
         category, message = flash_message
-        return f"<div class='flash-stack'><div class='flash {category}'>{message}</div></div>"
+        return f"<div class='flash-stack'><div class='flash {category}'>{html.escape(message)}</div></div>"
 
     def html_page(self, title: str, body: str):
         return f"""<!doctype html>
