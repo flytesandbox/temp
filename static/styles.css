@@ -56,12 +56,18 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   border: 1px solid #cbd6ff;
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
   font-size: 1rem;
   background: #fff;
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
 }
 
 button {
@@ -88,6 +94,28 @@ button.secondary {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+}
+
+.dashboard-nav {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.nav-link {
+  text-decoration: none;
+  padding: 0.5rem 0.8rem;
+  border: 1px solid #cfd8ff;
+  border-radius: 999px;
+  color: #33406e;
+  font-weight: 600;
+}
+
+.nav-link.active {
+  background: #4558ff;
+  border-color: #4558ff;
+  color: #fff;
 }
 
 .task-card {
@@ -258,10 +286,15 @@ button {
 .dashboard.theme-midnight .task-card,
 .dashboard.theme-midnight .status-list li,
 .dashboard.theme-midnight input,
-.dashboard.theme-midnight select {
+.dashboard.theme-midnight select,
+.dashboard.theme-midnight textarea {
   background: #1a2443;
   border-color: #36487f;
   color: #eef2ff;
+}
+
+.field-log {
+  margin-top: 1rem;
 }
 
 .dashboard.density-compact {

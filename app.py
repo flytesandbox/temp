@@ -121,6 +121,7 @@ class TaskTrackerApp:
     def __call__(self, environ, start_response):
         path = environ.get("PATH_INFO", "/")
         method = environ.get("REQUEST_METHOD", "GET")
+        query = parse_qs(environ.get("QUERY_STRING", ""))
         cookie = self.parse_cookies(environ.get("HTTP_COOKIE", ""))
         session_user = self.read_session_user(cookie)
 
@@ -130,7 +131,7 @@ class TaskTrackerApp:
         if path == "/":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            return self.render_dashboard(start_response, session_user, self.consume_flash(cookie))
+            return self.render_dashboard(start_response, session_user, self.consume_flash(cookie), query.get("view", ["dashboard"])[0])
 
         if path == "/login" and method == "GET":
             return self.render_login(start_response, self.consume_flash(cookie))
@@ -449,14 +450,25 @@ class TaskTrackerApp:
         if session_user["role"] == "employer":
             return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
 
+        if not form.get("contact_name", "").strip():
+            primary_first = form.get("primary_first_name", "").strip()
+            primary_last = form.get("primary_last_name", "").strip()
+            form["contact_name"] = f"{primary_first} {primary_last}".strip()
+        form["work_email"] = form.get("work_email") or form.get("primary_email", "")
+        form["phone"] = form.get("phone") or form.get("primary_phone", "")
+        form["company_size"] = form.get("company_size") or form.get("total_employee_count", "")
+        form["industry"] = form.get("industry") or form.get("nature_of_business", "")
+        form["website"] = form.get("website") or "Not provided"
+        form["state"] = form.get("state") or form.get("physical_state", "")
+
         required = ["legal_name", "contact_name", "work_email", "phone", "company_size", "industry", "website", "state"]
         if any(not form.get(name, "").strip() for name in required):
-            return self.redirect(start_response, "/", flash=("error", "Please complete all employer onboarding fields."))
+            return self.redirect(start_response, "/?view=application", flash=("error", "Please complete all required application fields."))
 
         username = self.create_employer(session_user["id"], form)
         return self.redirect(
             start_response,
-            "/",
+            "/?view=employers",
             flash=("success", f"Employer onboarded. Portal username: {username}, temporary password: employer123"),
         )
 
@@ -520,7 +532,7 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_dashboard(self, start_response, user, flash_message):
+    def render_dashboard(self, start_response, user, flash_message, active_view="dashboard"):
         rows = self.get_users_with_completion()
         status_rows = "".join(
             (
@@ -636,48 +648,52 @@ class TaskTrackerApp:
                 </div>
               </section>
             """
-            employer_form_section = """
-              <section class='section-block'>
-                <h3>Employer Onboarding</h3>
-                <p class='subtitle'>New Employers are added once this form is complete.</p>
-                <form method='post' action='/employers/create' class='onboarding-grid'>
-                  <label>Legal business name
-                    <input name='legal_name' required />
-                  </label>
-                  <label>Primary contact
-                    <input name='contact_name' required />
-                  </label>
-                  <label>Work email
-                    <input name='work_email' type='email' required />
-                  </label>
-                  <label>Phone
-                    <input name='phone' required />
-                  </label>
-                  <label>Company size
-                    <select name='company_size' required>
-                      <option value=''>Select...</option>
-                      <option>1-24</option><option>25-49</option><option>50-99</option><option>100+</option>
-                    </select>
-                  </label>
-                  <label>Industry
-                    <input name='industry' required />
-                  </label>
-                  <label>Website
-                    <input name='website' placeholder='https://example.com' required />
-                  </label>
-                  <label>Headquarters state
-                    <input name='state' required />
-                  </label>
-                  <button type='submit'>Complete form & create Employer</button>
-                </form>
-              </section>
-            """
+            employer_form_section = self.render_ichra_application_form()
 
         employer_note = (
             "Employer accounts are read-only and can only see employers created by your manager."
             if user["role"] == "employer"
             else "All non-employer users can create new Employers from this form."
         )
+
+        nav_links = [
+            ("dashboard", "Dashboard"),
+            ("application", "New Employer Application"),
+            ("employers", "Employers"),
+            ("settings", "Settings"),
+        ]
+        nav_html = "".join(
+            f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
+            for key, label in nav_links
+            if not (user["role"] == "employer" and key in {"application", "settings"})
+        )
+
+        dashboard_panel = f"""
+            {task_section}
+            <section class='section-block'>
+              <h3>Team Completion Status</h3>
+              <ul class='status-list'>{status_rows}</ul>
+            </section>
+            {admin_section}
+        """
+        settings_panel = settings_section or "<section class='section-block'><p class='subtitle'>Employer accounts are read-only.</p></section>"
+        employers_panel = f"""
+            <section class='section-block'>
+              <h3>Employers</h3>
+              <p class='subtitle'>{html.escape(employer_note)}</p>
+              <table class='user-table'>
+                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Assigned Task</th></tr></thead>
+                <tbody>{employer_rows}</tbody>
+              </table>
+            </section>
+        """
+        panel_lookup = {
+            "dashboard": dashboard_panel,
+            "application": employer_form_section if user["role"] != "employer" else "",
+            "employers": employers_panel,
+            "settings": settings_panel,
+        }
+        active_panel = panel_lookup.get(active_view, dashboard_panel)
 
         html_body = self.flash_html(flash_message) + f"""
             <section class='card dashboard theme-{user['theme']} density-{user['density']}'>
@@ -689,30 +705,103 @@ class TaskTrackerApp:
                 </div>
                 <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
               </header>
-              {task_section}
-
-              <section class='section-block'>
-                <h3>Team Completion Status</h3>
-                <ul class='status-list'>{status_rows}</ul>
-              </section>
-              {settings_section}
-              {admin_section}
-
-              {employer_form_section}
-              <section class='section-block'>
-                <h3>Employers</h3>
-                <p class='subtitle'>{html.escape(employer_note)}</p>
-                <table class='user-table'>
-                  <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Assigned Task</th></tr></thead>
-                  <tbody>{employer_rows}</tbody>
-                </table>
-              </section>
+              <nav class='dashboard-nav'>{nav_html}</nav>
+              {active_panel}
             </section>
             """
         html_doc = self.html_page("Dashboard", html_body)
         headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
+
+    def render_ichra_application_form(self):
+        return """
+        <section class='section-block'>
+          <h3>Welcome to your ICHRA Application!</h3>
+          <p class='subtitle'>(takes 5 - 10 minutes to complete)</p>
+          <p class='subtitle'>This recreates every field from the source application and keeps the long form in its own navigation tab.</p>
+          <form method='post' action='/employers/create' class='form-grid'>
+            <h4>Desired ICHRA Start Date *</h4><input type='date' name='ichra_start_date' required />
+            <h4>Which service are you signing up for? *</h4>
+            <label><input type='radio' name='service_type' value='ICHRA Documents + Monthly Administration' required /> ICHRA Documents + Monthly Administration</label>
+            <label><input type='radio' name='service_type' value='ICHRA Documents Only' /> ICHRA Documents Only</label>
+
+            <h4>Primary and ICHRA Setup Contact</h4>
+            <label>Primary Contact First Name *<input name='primary_first_name' required /></label>
+            <label>Primary Contact Last Name *<input name='primary_last_name' required /></label>
+            <label>Phone *<input name='primary_phone' required /></label>
+            <label>Email *<input type='email' name='primary_email' required /></label>
+            <h4>What type of contact is this? (please check all that apply) *</h4>
+            <label><input type='checkbox' name='primary_main' value='yes' /> Main</label>
+            <label><input type='checkbox' name='primary_payroll' value='yes' /> Payroll</label>
+            <label><input type='checkbox' name='primary_compliance' value='yes' /> Compliance</label>
+            <label><input type='checkbox' name='primary_billing' value='yes' /> Billing</label>
+
+            <h4>Secondary Contact (Click Next to skip)</h4>
+            <label>First<input name='secondary_first_name' /></label>
+            <label>Last<input name='secondary_last_name' /></label>
+            <label>Phone<input name='secondary_phone' /></label>
+            <label>Email<input type='email' name='secondary_email' /></label>
+
+            <h4>ICHRA Welcome Call</h4>
+            <label>Select number of participants<input type='number' min='1' name='welcome_call_participants' /></label>
+
+            <h4>Company Information</h4>
+            <label>Legal Business Name *<input name='legal_name' required /></label>
+            <label>Doing Business As (if applicable)<input name='doing_business_as' /></label>
+            <label>Phone *<input name='phone' required /></label>
+            <label>Nature of Business *<input name='nature_of_business' required /></label>
+            <label>Total Employee Count *<input type='number' name='total_employee_count' required /></label>
+            <label>Total Eligible Employees *<input type='number' name='total_eligible_employees' required /></label>
+            <label>Federal EIN *<input name='federal_ein' required /></label>
+            <label>Corporation Type *<input name='corporation_type' required /></label>
+            <label>LLC Filed As<input name='llc_filed_as' /></label>
+
+            <h4>Address</h4>
+            <label>Physical Address Line 1 *<input name='physical_address_1' required /></label>
+            <label>Physical Address Line 2<input name='physical_address_2' /></label>
+            <label>Physical City *<input name='physical_city' required /></label>
+            <label>Physical State *<input name='physical_state' required /></label>
+            <label>Physical Zip Code *<input name='physical_zip' required /></label>
+            <label>Mailing Address Line 1<input name='mailing_address_1' /></label>
+            <label>Mailing Address Line 2<input name='mailing_address_2' /></label>
+            <label>Mailing City<input name='mailing_city' /></label>
+            <label>Mailing State<input name='mailing_state' /></label>
+            <label>Mailing Zip Code<input name='mailing_zip' /></label>
+            <label>Other participating entities/companies<input name='participating_entities' /></label>
+
+            <h4>ICHRA Setup - Step 1 of 4 - Reimbursements</h4>
+            <label>Which reimbursement option do you want to offer? *<input name='reimbursement_option' required /></label>
+
+            <h4>ICHRA Setup - 2 of 4 - Eligibility</h4>
+            <label>Do you need assistance with employee classes? *<input name='employee_class_assistance' required /></label>
+            <label>New hire eligibility period *<input name='new_hire_eligibility_period' required /></label>
+
+            <h4>ICHRA Setup - 3 of 4 - Contributions</h4>
+            <label>What are you planning to contribute? *<input name='planned_contribution' required /></label>
+            <label>Spouse/Dependent/Family contributions<input name='dependent_contributions' /></label>
+
+            <h4>ICHRA Setup - 4 of 4 - Claim Options</h4>
+            <label>Which claim option would you like to use? *<input name='claim_option' required /></label>
+
+            <h4>Agent Information</h4>
+            <label>Are you working with a health insurance agent? *<input name='agent_support' required /></label>
+
+            <h4>Plan Fee and Ongoing Reimbursements</h4>
+            <label>Please upload completed Bank Authorization (for reference only in this demo)<input type='file' name='bank_authorization_upload' /></label>
+            <label><input type='checkbox' name='terms_agreed' value='yes' required /> I agree to the terms and conditions *</label>
+            <label>Do you have any questions for us?<textarea name='questions_for_team'></textarea></label>
+
+            <button type='submit'>Finalize and Submit ICHRA Application</button>
+          </form>
+          <details class='field-log'>
+            <summary>Field inventory captured from provided source form</summary>
+            <p>Desired start date, service type, primary/secondary contacts, welcome call participants, company information, physical/mailing addresses,
+            participating entities, reimbursement setup, eligibility, contributions, claim options, agent details, bank authorization upload, terms acceptance,
+            final questions, and submit action.</p>
+          </details>
+        </section>
+        """
 
     def serve_static(self, path: str, start_response):
         file_path = BASE_DIR / path.lstrip("/")
