@@ -215,7 +215,7 @@ class AppTests(unittest.TestCase):
 
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertNotIn("User Settings", dashboard["body"])
-        self.assertNotIn("Super Admin · User Management", dashboard["body"])
+        self.assertNotIn("Admin · Account Management", dashboard["body"])
         self.assertIn("Employers", dashboard["body"])
 
     def test_employer_visibility_is_limited_to_creator_scope(self):
@@ -265,6 +265,84 @@ class AppTests(unittest.TestCase):
 
         self.assertIn("Atlas One", dashboard["body"])
         self.assertNotIn("Beta Care", dashboard["body"])
+
+
+    def test_super_admin_can_create_broker_accounts(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        create = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=broker1&password=brokerpw&role=broker",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=broker1&password=brokerpw")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+
+    def test_broker_can_create_employer_and_owns_it(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=broker2&password=brokerpw&role=broker",
+            cookie_header=admin_cookie,
+        )
+
+        broker_cookie = ""
+        broker_cookie = merge_cookies(broker_cookie, call_app(self.app, method="POST", path="/login", body="username=broker2&password=brokerpw")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Broker+Client&contact_name=Casey&work_email=casey%40client.com&phone=555"
+                "&company_size=10&industry=Consulting&website=https%3A%2F%2Fclient.com&state=CA"
+            ),
+            cookie_header=broker_cookie,
+        )
+
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=broker_cookie)
+        self.assertIn("Broker Client", dashboard["body"])
+        self.assertIn("broker2", dashboard["body"])
+
+    def test_employer_can_mark_application_complete(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Apply+Now&contact_name=Toni&work_email=toni%40apply.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fapply.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role='employer' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=employer123")["headers"],
+        )
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/application",
+            body="status=complete",
+            cookie_header=employer_cookie,
+        )
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
+        self.assertIn("Complete", dashboard["body"])
 
 
 if __name__ == "__main__":

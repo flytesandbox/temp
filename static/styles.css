@@ -321,3 +321,22 @@ button {
 .onboarding-grid button {
   grid-column: 1 / -1;
 }
+
+
+.dashboard.role-super_admin {
+  border-top: 6px solid #5a3bff;
+}
+
+.dashboard.role-broker {
+  border-top: 6px solid #00867a;
+  background-image: linear-gradient(180deg, #eefcf9, #ffffff);
+}
+
+.dashboard.role-employer {
+  border-top: 6px solid #b36a00;
+  background-image: linear-gradient(180deg, #fff9ef, #ffffff);
+}
+
+.dashboard.role-user {
+  border-top: 6px solid #4558ff;
+}
