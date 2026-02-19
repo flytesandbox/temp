@@ -360,6 +360,45 @@ class AppTests(unittest.TestCase):
         self.assertIn("admin", login_page["body"])
         self.assertIn("brokerx", login_page["body"])
         self.assertIn("alex", login_page["body"])
+        self.assertIn("New Employer Setup", login_page["body"])
+
+    def test_public_signup_creates_employer_request(self):
+        response = call_app(
+            self.app,
+            method="POST",
+            path="/signup",
+            body="legal_name=Public+Co&prospect_name=Riley&prospect_email=riley%40public.com&prospect_phone=555",
+        )
+        self.assertEqual(dict(response["headers"]).get("Location"), "/login")
+
+        db = self.app.db()
+        employer = db.execute("SELECT legal_name, primary_user_id FROM employers WHERE legal_name = 'Public Co'").fetchone()
+        self.assertIsNotNone(employer)
+        self.assertIsNotNone(employer["primary_user_id"])
+        db.close()
+
+    def test_notifications_view_supports_mark_seen(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Notice+Target&contact_name=Rae&work_email=rae%40notice.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fnotice.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+
+        notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=cookie)
+        self.assertIn("Notifications", notifications["body"])
+
+        db = self.app.db()
+        note = db.execute("SELECT id FROM notifications WHERE user_id = (SELECT id FROM users WHERE username='alex') ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+        seen = call_app(self.app, method="POST", path="/notifications/seen", body=f"notification_id={note['id']}", cookie_header=cookie)
+        self.assertEqual(dict(seen["headers"]).get("Location"), "/?view=notifications")
 
     def test_super_admin_can_filter_logs_and_update_employer_settings(self):
         admin_cookie = ""
