@@ -8,11 +8,12 @@ from wsgiref.util import setup_testing_defaults
 from app import TaskTrackerApp
 
 
-def call_app(app, method="GET", path="/", body="", cookie_header=""):
+def call_app(app, method="GET", path="/", body="", cookie_header="", query_string=""):
     environ = {}
     setup_testing_defaults(environ)
     environ["REQUEST_METHOD"] = method
     environ["PATH_INFO"] = path
+    environ["QUERY_STRING"] = query_string
     data = body.encode("utf-8")
     environ["CONTENT_LENGTH"] = str(len(data))
     environ["wsgi.input"] = io.BytesIO(data)
@@ -166,7 +167,7 @@ class AppTests(unittest.TestCase):
             ),
             cookie_header=cookie,
         )
-        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+        self.assertEqual(dict(create["headers"]).get("Location"), "/?view=employers")
 
         db = self.app.db()
         employer = db.execute("SELECT * FROM employers WHERE legal_name = 'Acme Health'").fetchone()
@@ -212,7 +213,7 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(dict(forbidden["headers"]).get("Location"), "/")
 
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertNotIn("User Settings", dashboard["body"])
         self.assertNotIn("Super Admin · User Management", dashboard["body"])
         self.assertIn("Employers", dashboard["body"])
@@ -260,7 +261,7 @@ class AppTests(unittest.TestCase):
                 body=f"username={employer_user['username']}&password=employer123",
             )["headers"],
         )
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
 
         self.assertIn("Atlas One", dashboard["body"])
         self.assertNotIn("Beta Care", dashboard["body"])
