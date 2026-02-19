@@ -67,7 +67,7 @@ class AppTests(unittest.TestCase):
         self.assertTrue(response["status"].startswith("302"))
         self.assertEqual(dict(response["headers"]).get("Location"), "/login")
 
-    def test_regular_user_can_update_username_and_password(self):
+    def test_admin_user_can_update_username_and_password(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
@@ -84,7 +84,7 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=alex2&password=betterpw")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
-    def test_regular_user_can_customize_dashboard_style(self):
+    def test_admin_user_can_customize_dashboard_style(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=sam&password=user")
         cookie = merge_cookies(cookie, login["headers"])
@@ -111,7 +111,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=river&password=user&role=user",
+            body="username=river&password=user&role=admin",
             cookie_header=cookie,
         )
         self.assertEqual(dict(create["headers"]).get("Location"), "/")
@@ -131,7 +131,7 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
-    def test_regular_user_cannot_create_or_modify_users(self):
+    def test_admin_can_create_brokers_under_org(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
         cookie = merge_cookies(cookie, login["headers"])
@@ -140,15 +140,13 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/admin/users/create",
-            body="username=hacker&password=hackerpw&role=user",
+            body="username=teambroker&password=user&role=broker",
             cookie_header=cookie,
         )
-        cookie = merge_cookies(cookie, create["headers"])
         self.assertEqual(dict(create["headers"]).get("Location"), "/")
 
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertNotIn("hacker", dashboard["body"])
-        self.assertIn("Team Completion Status", dashboard["body"])
+        relogin = call_app(self.app, method="POST", path="/login", body="username=teambroker&password=user")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
     def test_login_session_cookie_allows_immediate_dashboard_access(self):
         cookie = ""
@@ -381,6 +379,7 @@ class AppTests(unittest.TestCase):
 
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
         self.assertIn("ICHRA Application", view["body"])
+        self.assertIn("Existing Employer", view["body"])
         self.assertIn("Basic Employer Application", view["body"])
         self.assertIn("data-panel-mode='basic' hidden", view["body"])
 
