@@ -78,6 +78,7 @@ button {
   padding: 0.7rem 1rem;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button.secondary {
@@ -249,10 +250,16 @@ button {
 }
 
 .inline-form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
+}
+
+.inline-form input,
+.inline-form select,
+.inline-form button {
+  min-width: 0;
 }
 
 .employer-settings-form {
@@ -275,6 +282,18 @@ button {
   padding: 0.6rem;
   text-align: left;
   vertical-align: top;
+  word-break: break-word;
+}
+
+.user-table td .inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.user-table td button,
+.user-table td .nav-link {
+  width: 100%;
+  text-align: center;
 }
 
 .dashboard.theme-sunset {
@@ -368,6 +387,19 @@ button {
 
 .persistent-banner {
   margin-bottom: 0.8rem;
+}
+
+.notifications-list .notification-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 500;
 }
 
 @media (max-width: 390px) {
