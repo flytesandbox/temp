@@ -87,7 +87,6 @@ class TaskTrackerApp:
         method = environ.get("REQUEST_METHOD", "GET")
         cookie = self.parse_cookies(environ.get("HTTP_COOKIE", ""))
         session_user = self.read_session_user(cookie)
-        form_data = self.parse_form(environ)
 
         if path.startswith("/static/"):
             return self.serve_static(path, start_response)
@@ -101,7 +100,7 @@ class TaskTrackerApp:
             return self.render_login(start_response, self.consume_flash(cookie))
 
         if path == "/login" and method == "POST":
-            return self.handle_login(start_response, form_data)
+            return self.handle_login(start_response, self.parse_form(environ))
 
         if path == "/logout" and method == "POST":
             return self.handle_logout(start_response)

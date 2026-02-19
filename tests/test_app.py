@@ -143,6 +143,33 @@ class AppTests(unittest.TestCase):
         alex_dashboard = call_app(self.app, method="GET", path="/", cookie_header=alex_cookie)
         self.assertEqual(alex_dashboard["body"].count("Completed"), 2)
 
+    def test_empty_post_without_content_length_does_not_block_task_complete(self):
+        cookie = ""
+
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        environ = {}
+        setup_testing_defaults(environ)
+        environ["REQUEST_METHOD"] = "POST"
+        environ["PATH_INFO"] = "/task/complete"
+        environ["wsgi.input"] = io.BytesIO(b"")
+        environ["CONTENT_TYPE"] = "application/x-www-form-urlencoded"
+        environ["CONTENT_LENGTH"] = ""
+        environ["HTTP_COOKIE"] = cookie
+
+        result = {}
+
+        def start_response(status, headers):
+            result["status"] = status
+            result["headers"] = headers
+
+        chunks = self.app(environ, start_response)
+        result["body"] = b"".join(chunks).decode("utf-8")
+
+        self.assertTrue(result["status"].startswith("302"))
+        self.assertEqual(dict(result["headers"]).get("Location"), "/")
+
     def test_logout_clears_session_and_allows_relogin(self):
         cookie = ""
 
