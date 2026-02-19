@@ -113,12 +113,6 @@ button.secondary {
   font-weight: 600;
 }
 
-.settings-link {
-  color: #2f4eb0;
-  font-weight: 700;
-  text-decoration: underline;
-}
-
 .nav-link.active {
   background: #4558ff;
   border-color: #4558ff;
@@ -300,15 +294,6 @@ button {
 .user-table td .nav-link {
   width: 100%;
   text-align: center;
-<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
-}
-
-.user-table td .settings-link {
-  width: auto;
-  text-align: left;
-  display: inline;
-=======
->>>>>>> main
 }
 
 .dashboard.theme-sunset {
@@ -417,44 +402,6 @@ button {
   font-weight: 500;
 }
 
-<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
-.welcome-cta {
-  background: linear-gradient(135deg, #f5f8ff, #fff4f8);
-  border: 1px solid #d8e2ff;
-  border-radius: 12px;
-  padding: 0.9rem;
-}
-
-.signup-modal {
-  border: none;
-  border-radius: 14px;
-  padding: 1rem;
-  width: min(560px, 92vw);
-  box-shadow: 0 24px 50px rgba(38, 57, 110, 0.25);
-}
-
-.signup-modal::backdrop {
-  background: rgba(17, 24, 39, 0.5);
-}
-
-.modal-close-row {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.settings-dashboard-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1rem;
-}
-
-.details-grid {
-  display: grid;
-  gap: 0.55rem;
-}
-
-=======
->>>>>>> main
 @media (max-width: 390px) {
   .container {
     width: min(100%, 96vw);
