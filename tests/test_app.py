@@ -38,7 +38,7 @@ def merge_cookies(old_cookie_header, response_headers):
     for header, value in response_headers:
         if header.lower() == "set-cookie":
             jar.load(value)
-    return "; ".join(f"{k}={m.value}" for k, m in jar.items() if m.value)
+    return "; ".join(f"{k}={m.coded_value}" for k, m in jar.items() if m.value)
 
 
 class AppTests(unittest.TestCase):
@@ -89,6 +89,23 @@ class AppTests(unittest.TestCase):
         cookie = merge_cookies(cookie, login["headers"])
 
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertTrue(dashboard["status"].startswith("200"))
+        self.assertIn("Welcome, Alex", dashboard["body"])
+
+    def test_dashboard_access_with_session_and_flash_cookies(self):
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        self.assertTrue(login["status"].startswith("302"))
+
+        set_cookie_values = [value for header, value in login["headers"] if header.lower() == "set-cookie"]
+        self.assertGreaterEqual(len(set_cookie_values), 2)
+
+        cookie_pairs = []
+        for header_value in set_cookie_values:
+            cookie_pairs.append(header_value.split(";", 1)[0])
+
+        cookie_header = "; ".join(cookie_pairs)
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie_header)
+
         self.assertTrue(dashboard["status"].startswith("200"))
         self.assertIn("Welcome, Alex", dashboard["body"])
 

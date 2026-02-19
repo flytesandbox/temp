@@ -85,7 +85,7 @@ class TaskTrackerApp:
     def __call__(self, environ, start_response):
         path = environ.get("PATH_INFO", "/")
         method = environ.get("REQUEST_METHOD", "GET")
-        cookie = cookies.SimpleCookie(environ.get("HTTP_COOKIE", ""))
+        cookie = self.parse_cookies(environ.get("HTTP_COOKIE", ""))
         session_user = self.read_session_user(cookie)
         form_data = self.parse_form(environ)
 
@@ -114,6 +114,12 @@ class TaskTrackerApp:
 
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found"]
+
+    def parse_cookies(self, cookie_header: str):
+        jar = cookies.SimpleCookie()
+        if cookie_header:
+            jar.load(cookie_header)
+        return jar
 
     def parse_form(self, environ):
         raw_length = environ.get("CONTENT_LENGTH", "")
@@ -186,7 +192,11 @@ class TaskTrackerApp:
         return raw if hmac.compare_digest(sig, expected) else None
 
     def read_session_user(self, cookie: cookies.SimpleCookie):
+        if os.environ.get("DEBUG_AUTH") == "1":
+            print(f"DEBUG_AUTH: HTTP_COOKIE present={bool(cookie)}")
         signed = cookie.get("session")
+        if os.environ.get("DEBUG_AUTH") == "1":
+            print(f"DEBUG_AUTH: session cookie parsed={bool(signed)}")
         if not signed:
             return None
         raw = self.unsign(signed.value)
@@ -233,10 +243,24 @@ class TaskTrackerApp:
         return [b""]
 
     def cookie_header(self, name: str, value: str):
-        return f"{name}={value}; Path=/; HttpOnly; SameSite=Lax"
+        jar = cookies.SimpleCookie()
+        jar[name] = value
+        morsel = jar[name]
+        morsel["path"] = "/"
+        morsel["httponly"] = True
+        morsel["samesite"] = "Lax"
+        return morsel.OutputString()
 
     def expire_cookie_header(self, name: str):
-        return f"{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT"
+        jar = cookies.SimpleCookie()
+        jar[name] = ""
+        morsel = jar[name]
+        morsel["path"] = "/"
+        morsel["httponly"] = True
+        morsel["samesite"] = "Lax"
+        morsel["max-age"] = 0
+        morsel["expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
+        return morsel.OutputString()
 
     def render_login(self, start_response, flash_message):
         html = self.html_page(
