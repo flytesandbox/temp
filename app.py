@@ -39,7 +39,8 @@ class TaskTrackerApp:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
                 theme TEXT NOT NULL DEFAULT 'default',
-                density TEXT NOT NULL DEFAULT 'comfortable'
+                density TEXT NOT NULL DEFAULT 'comfortable',
+                created_by_user_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS tasks (
@@ -55,6 +56,22 @@ class TaskTrackerApp:
                 completed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(task_id, user_id)
             );
+
+            CREATE TABLE IF NOT EXISTS employers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                legal_name TEXT NOT NULL,
+                contact_name TEXT NOT NULL,
+                work_email TEXT NOT NULL,
+                phone TEXT NOT NULL,
+                company_size TEXT NOT NULL,
+                industry TEXT NOT NULL,
+                website TEXT NOT NULL,
+                state TEXT NOT NULL,
+                onboarding_task TEXT NOT NULL,
+                linked_user_id INTEGER NOT NULL UNIQUE,
+                created_by_user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
@@ -65,6 +82,8 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default'")
         if "density" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN density TEXT NOT NULL DEFAULT 'comfortable'")
+        if "created_by_user_id" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER")
 
         db.executemany(
             """
@@ -89,7 +108,7 @@ class TaskTrackerApp:
                 (hash_password("admin123"), "admin"),
             ],
         )
-        db.execute("UPDATE users SET role = 'super_admin' WHERE username = 'admin'")
+        db.execute("UPDATE users SET role = 'super_admin', created_by_user_id = NULL WHERE username = 'admin'")
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -125,17 +144,23 @@ class TaskTrackerApp:
         if path == "/task/complete" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
+            if session_user["role"] == "employer":
+                return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             self.complete_for_user(session_user["id"], 1)
             return self.redirect(start_response, "/", flash=("success", "Task marked complete. Everyone can now see your status."))
 
         if path == "/settings/profile" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
+            if session_user["role"] == "employer":
+                return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             return self.handle_profile_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/settings/style" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
+            if session_user["role"] == "employer":
+                return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             return self.handle_style_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/admin/users/create" and method == "POST":
@@ -151,6 +176,11 @@ class TaskTrackerApp:
             if session_user["role"] != "super_admin":
                 return self.redirect(start_response, "/", flash=("error", "Only the super admin can modify users."))
             return self.handle_admin_update_user(start_response, self.parse_form(environ))
+
+        if path == "/employers/create" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_create_employer(start_response, session_user, self.parse_form(environ))
 
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found"]
@@ -203,18 +233,32 @@ class TaskTrackerApp:
             FROM users u
             LEFT JOIN task_completions tc
                 ON tc.user_id = u.id AND tc.task_id = 1
+            WHERE u.role != 'employer'
             ORDER BY u.id
             """
         ).fetchall()
         db.close()
         return rows
 
+    def list_visible_employers(self, session_user):
+        db = self.db()
+        creator_id = session_user["id"] if session_user["role"] != "employer" else session_user["created_by_user_id"]
+        rows = db.execute(
+            """
+            SELECT e.*, u.username AS portal_username
+            FROM employers e
+            JOIN users u ON u.id = e.linked_user_id
+            WHERE e.created_by_user_id = ?
+            ORDER BY e.created_at DESC
+            """,
+            (creator_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
     def complete_for_user(self, user_id: int, task_id: int):
         db = self.db()
-        db.execute(
-            "INSERT OR IGNORE INTO task_completions (task_id, user_id) VALUES (?, ?)",
-            (task_id, user_id),
-        )
+        db.execute("INSERT OR IGNORE INTO task_completions (task_id, user_id) VALUES (?, ?)", (task_id, user_id))
         db.commit()
         db.close()
 
@@ -238,7 +282,7 @@ class TaskTrackerApp:
     def create_user(self, username: str, password: str, role: str):
         db = self.db()
         db.execute(
-            "INSERT INTO users (username, display_name, password_hash, role) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (username, display_name, password_hash, role, created_by_user_id) VALUES (?, ?, ?, ?, NULL)",
             (username, username.capitalize(), hash_password(password), role),
         )
         db.commit()
@@ -257,6 +301,49 @@ class TaskTrackerApp:
         )
         db.commit()
         db.close()
+
+    def build_employer_username(self, db, legal_name: str) -> str:
+        seed = "".join(ch for ch in legal_name.lower() if ch.isalnum())[:12] or "employer"
+        count = db.execute("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?", (f"{seed}%",)).fetchone()["n"]
+        return f"{seed}{count + 1}"
+
+    def create_employer(self, creator_user_id: int, form: dict[str, str]) -> str:
+        db = self.db()
+        username = self.build_employer_username(db, form["legal_name"])
+        display_name = form["contact_name"].strip() or form["legal_name"].strip()
+        db.execute(
+            """
+            INSERT INTO users (username, display_name, password_hash, role, created_by_user_id)
+            VALUES (?, ?, ?, 'employer', ?)
+            """,
+            (username, display_name, hash_password("employer123"), creator_user_id),
+        )
+        linked_user_id = db.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
+
+        db.execute(
+            """
+            INSERT INTO employers (
+                legal_name, contact_name, work_email, phone, company_size,
+                industry, website, state, onboarding_task, linked_user_id, created_by_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                form["legal_name"].strip(),
+                form["contact_name"].strip(),
+                form["work_email"].strip().lower(),
+                form["phone"].strip(),
+                form["company_size"].strip(),
+                form["industry"].strip(),
+                form["website"].strip(),
+                form["state"].strip(),
+                "Complete benefits roster import and confirm renewal month.",
+                linked_user_id,
+                creator_user_id,
+            ),
+        )
+        db.commit()
+        db.close()
+        return username
 
     def sign(self, value: str) -> str:
         sig = hmac.new(self.secret_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -358,6 +445,21 @@ class TaskTrackerApp:
             return self.redirect(start_response, "/", flash=("error", "Cannot update user to that username."))
         return self.redirect(start_response, "/", flash=("success", "User updated."))
 
+    def handle_create_employer(self, start_response, session_user, form):
+        if session_user["role"] == "employer":
+            return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
+
+        required = ["legal_name", "contact_name", "work_email", "phone", "company_size", "industry", "website", "state"]
+        if any(not form.get(name, "").strip() for name in required):
+            return self.redirect(start_response, "/", flash=("error", "Please complete all employer onboarding fields."))
+
+        username = self.create_employer(session_user["id"], form)
+        return self.redirect(
+            start_response,
+            "/",
+            flash=("success", f"Employer onboarded. Portal username: {username}, temporary password: employer123"),
+        )
+
     def handle_logout(self, start_response):
         headers = [
             ("Location", "/login"),
@@ -388,24 +490,23 @@ class TaskTrackerApp:
         jar[name] = ""
         morsel = jar[name]
         morsel["path"] = "/"
+        morsel["max-age"] = 0
         morsel["httponly"] = True
         morsel["samesite"] = "Lax"
-        morsel["max-age"] = 0
-        morsel["expires"] = "Thu, 01 Jan 1970 00:00:00 GMT"
         return morsel.OutputString()
 
     def render_login(self, start_response, flash_message):
         html_body = self.flash_html(flash_message) + """
-            <section class=\"card auth-card\">
-              <p class=\"eyebrow\">✨ Welcome aboard</p>
-              <h1>Monolith Task Tracker</h1>
-              <p class=\"subtitle\">Log in with a user account or the super admin account.</p>
-              <form method=\"post\" action=\"/login\" class=\"form-grid\">
-                <label>Username<input type=\"text\" name=\"username\" placeholder=\"alex, sam, or admin\" required /></label>
-                <label>Password<input type=\"password\" name=\"password\" placeholder=\"password\" required /></label>
-                <button type=\"submit\">Log In to Continue</button>
+            <section class="card auth-card">
+              <p class="eyebrow">Monolith Workspace</p>
+              <h1>Log in to continue</h1>
+              <p class="subtitle">Choose your account and keep the deployment checklist moving.</p>
+              <form method="post" action="/login" class="form-grid">
+                <label>Username <input type="text" name="username" placeholder="alex" required /></label>
+                <label>Password <input type="password" name="password" placeholder="password" required /></label>
+                <button type="submit">Log In to Continue</button>
               </form>
-              <div class=\"hint\"><strong>Demo accounts:</strong>
+              <div class="hint"><strong>Demo accounts:</strong>
                 <ul>
                   <li><code>alex</code> / <code>password123</code></li>
                   <li><code>sam</code> / <code>password123</code></li>
@@ -430,6 +531,22 @@ class TaskTrackerApp:
             )
             for row in rows
         )
+
+        employers = self.list_visible_employers(user)
+        employer_rows = "".join(
+            f"""
+            <tr>
+              <td>{html.escape(row['legal_name'])}</td>
+              <td>{html.escape(row['contact_name'])}</td>
+              <td>{html.escape(row['work_email'])}</td>
+              <td>{html.escape(row['portal_username'])}</td>
+              <td>{html.escape(row['onboarding_task'])}</td>
+            </tr>
+            """
+            for row in employers
+        )
+        if not employer_rows:
+            employer_rows = "<tr><td colspan='5'>No employers onboarded yet.</td></tr>"
 
         admin_section = ""
         if user["role"] == "super_admin":
@@ -473,28 +590,18 @@ class TaskTrackerApp:
               </section>
             """
 
-        html_body = self.flash_html(flash_message) + f"""
-            <section class=\"card dashboard theme-{user['theme']} density-{user['density']}\">
-              <div class=\"welcome-banner\">🎉 Great to see you! Let's make today productive.</div>
-              <header class=\"dashboard-header\">
-                <div>
-                  <h1>Welcome, {html.escape(user['display_name'])}</h1>
-                  <p class=\"subtitle\">Track shared progress for deployment validation.</p>
-                </div>
-                <form method=\"post\" action=\"/logout\"><button class=\"secondary\" type=\"submit\">Log Out</button></form>
-              </header>
-
-              <article class=\"task-card\">
+        employer_form_section = ""
+        settings_section = ""
+        task_section = ""
+        if user["role"] != "employer":
+            task_section = """
+              <article class='task-card'>
                 <h2>Deployment Readiness Task</h2>
                 <p>Confirm the app works in Codespaces and on Linode.</p>
-                <form method=\"post\" action=\"/task/complete\"><button type=\"submit\">Mark My Task Complete</button></form>
+                <form method='post' action='/task/complete'><button type='submit'>Mark My Task Complete</button></form>
               </article>
-
-              <section class='section-block'>
-                <h3>Team Completion Status</h3>
-                <ul class=\"status-list\">{status_rows}</ul>
-              </section>
-
+            """
+            settings_section = f"""
               <section class='section-block settings-grid'>
                 <div>
                   <h3>User Settings</h3>
@@ -528,7 +635,78 @@ class TaskTrackerApp:
                   </form>
                 </div>
               </section>
+            """
+            employer_form_section = """
+              <section class='section-block'>
+                <h3>Employer Onboarding</h3>
+                <p class='subtitle'>New Employers are added once this form is complete.</p>
+                <form method='post' action='/employers/create' class='onboarding-grid'>
+                  <label>Legal business name
+                    <input name='legal_name' required />
+                  </label>
+                  <label>Primary contact
+                    <input name='contact_name' required />
+                  </label>
+                  <label>Work email
+                    <input name='work_email' type='email' required />
+                  </label>
+                  <label>Phone
+                    <input name='phone' required />
+                  </label>
+                  <label>Company size
+                    <select name='company_size' required>
+                      <option value=''>Select...</option>
+                      <option>1-24</option><option>25-49</option><option>50-99</option><option>100+</option>
+                    </select>
+                  </label>
+                  <label>Industry
+                    <input name='industry' required />
+                  </label>
+                  <label>Website
+                    <input name='website' placeholder='https://example.com' required />
+                  </label>
+                  <label>Headquarters state
+                    <input name='state' required />
+                  </label>
+                  <button type='submit'>Complete form & create Employer</button>
+                </form>
+              </section>
+            """
+
+        employer_note = (
+            "Employer accounts are read-only and can only see employers created by your manager."
+            if user["role"] == "employer"
+            else "All non-employer users can create new Employers from this form."
+        )
+
+        html_body = self.flash_html(flash_message) + f"""
+            <section class='card dashboard theme-{user['theme']} density-{user['density']}'>
+              <div class='welcome-banner'>🎉 Great to see you! Let's make today productive.</div>
+              <header class='dashboard-header'>
+                <div>
+                  <h1>Welcome, {html.escape(user['display_name'])}</h1>
+                  <p class='subtitle'>Track shared progress for deployment validation.</p>
+                </div>
+                <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
+              </header>
+              {task_section}
+
+              <section class='section-block'>
+                <h3>Team Completion Status</h3>
+                <ul class='status-list'>{status_rows}</ul>
+              </section>
+              {settings_section}
               {admin_section}
+
+              {employer_form_section}
+              <section class='section-block'>
+                <h3>Employers</h3>
+                <p class='subtitle'>{html.escape(employer_note)}</p>
+                <table class='user-table'>
+                  <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Assigned Task</th></tr></thead>
+                  <tbody>{employer_rows}</tbody>
+                </table>
+              </section>
             </section>
             """
         html_doc = self.html_page("Dashboard", html_body)
