@@ -360,7 +360,18 @@ class AppTests(unittest.TestCase):
         self.assertIn("admin", login_page["body"])
         self.assertIn("brokerx", login_page["body"])
         self.assertIn("alex", login_page["body"])
-        self.assertIn("Prospective Employer Sign Up", login_page["body"])
+        self.assertIn("Open New Employer Setup", login_page["body"])
+        self.assertIn("new-employer-modal", login_page["body"])
+
+    def test_application_view_renders_toggle_panels(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
+        self.assertIn("ICHRA Application", view["body"])
+        self.assertIn("Basic Employer Application", view["body"])
+        self.assertIn("data-panel-mode='basic' hidden", view["body"])
 
     def test_public_signup_creates_employer_request(self):
         response = call_app(

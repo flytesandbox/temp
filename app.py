@@ -601,11 +601,14 @@ class TaskTrackerApp:
 
     def update_employer_settings(self, employer_id: int, form: dict[str, str]):
         db = self.db()
+        broker_user_id = int(form["broker_user_id"]) if form.get("broker_user_id") else None
+        primary_user_id = int(form["primary_user_id"]) if form.get("primary_user_id") else None
         db.execute(
             """
             UPDATE employers
             SET legal_name = ?, contact_name = ?, work_email = ?, phone = ?,
-                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?
+                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?,
+                broker_user_id = ?, primary_user_id = ?
             WHERE id = ?
             """,
             (
@@ -618,6 +621,8 @@ class TaskTrackerApp:
                 form["website"],
                 form["state"],
                 form["onboarding_task"],
+                broker_user_id,
+                primary_user_id,
                 employer_id,
             ),
         )
@@ -807,6 +812,9 @@ class TaskTrackerApp:
             return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", "Employer password must be at least 4 characters."))
         clean["portal_password"] = portal_password
 
+        clean["broker_user_id"] = form.get("broker_user_id", "").strip()
+        clean["primary_user_id"] = form.get("primary_user_id", "").strip()
+
         self.update_employer_settings(employer_id, clean)
         self.log_action(session_user["id"], "employer_updated", "employer", employer_id, clean["legal_name"], "Employer settings updated")
         return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("success", "Employer settings updated."))
@@ -895,16 +903,28 @@ class TaskTrackerApp:
                 <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
               </div>
               <hr />
-              <h2>Prospective Employer Sign Up</h2>
-              <p class="subtitle">Public form for employers needing a basic employer setup request.</p>
-              <form method="post" action="/signup" class="form-grid">
-                <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
-                <label>Contact Name <input type="text" name="prospect_name" required /></label>
-                <label>Work Email <input type="email" name="prospect_email" required /></label>
-                <label>Phone <input type="text" name="prospect_phone" /></label>
-                <button type="submit" class="secondary">Submit Employer Request</button>
-              </form>
+              <section class="section-block panel-card welcome-panel">
+                <h2>New Employer Setup</h2>
+                <p class="subtitle">Start your employer journey with a quick intake. We'll guide your team from first step to launch.</p>
+                <button type="button" class="secondary" data-modal-open="new-employer-modal">Open New Employer Setup</button>
+              </section>
             </section>
+            <div class="modal" id="new-employer-modal" aria-hidden="true">
+              <div class="modal-backdrop" data-modal-close="new-employer-modal"></div>
+              <section class="modal-card card">
+                <button type="button" class="modal-close" aria-label="Close" data-modal-close="new-employer-modal">×</button>
+                <p class="eyebrow">Welcome aboard</p>
+                <h2>Prospective Employer Sign Up</h2>
+                <p class="subtitle">Tell us about your company and we will prepare your personalized onboarding workspace.</p>
+                <form method="post" action="/signup" class="form-grid">
+                  <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
+                  <label>Contact Name <input type="text" name="prospect_name" required /></label>
+                  <label>Work Email <input type="email" name="prospect_email" required /></label>
+                  <label>Phone <input type="text" name="prospect_phone" /></label>
+                  <button type="submit">Submit Employer Request</button>
+                </form>
+              </section>
+            </div>
             """
         html_doc = self.html_page("Monolith Task Tracker", html_body)
         headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
@@ -1211,120 +1231,102 @@ class TaskTrackerApp:
 
     def render_ichra_application_form(self):
         return """
-        <section class='section-block'>
-          <h3>ICHRA Setup Application</h3>
-          <p class='subtitle'>(takes 5 - 10 minutes to complete)</p>
-          <p class='subtitle'>Used to sign an employer up for ICHRA once the employer record already exists.</p>
-          <form method='post' action='/employers/create' class='form-grid'>
-            <label>Setup Type *
-              <select name='setup_mode'>
-                <option value='ichra'>ICHRA Setup Application</option>
-                <option value='basic'>Basic Employer Setup</option>
-              </select>
-            </label>
-            <h4>Desired ICHRA Start Date *</h4><input type='date' name='ichra_start_date' required />
-            <h4>Which service are you signing up for? *</h4>
-            <label><input type='radio' name='service_type' value='ICHRA Documents + Monthly Administration' required /> ICHRA Documents + Monthly Administration</label>
-            <label><input type='radio' name='service_type' value='ICHRA Documents Only' /> ICHRA Documents Only</label>
+        <section class='section-block panel-card'>
+          <h3>Employer Application Center</h3>
+          <p class='subtitle'>Choose the workflow you want to launch.</p>
+          <div class='toggle-row'>
+            <button type='button' class='setup-toggle active' data-setup-mode='ichra'>ICHRA Application</button>
+            <button type='button' class='setup-toggle' data-setup-mode='basic'>Basic Employer Application</button>
+          </div>
 
-            <h4>Primary and ICHRA Setup Contact</h4>
-            <label>Primary Contact First Name *<input name='primary_first_name' required /></label>
-            <label>Primary Contact Last Name *<input name='primary_last_name' required /></label>
-            <label>Phone *<input name='primary_phone' required /></label>
-            <label>Email *<input type='email' name='primary_email' required /></label>
-            <h4>What type of contact is this? (please check all that apply) *</h4>
-            <label><input type='checkbox' name='primary_main' value='yes' /> Main</label>
-            <label><input type='checkbox' name='primary_payroll' value='yes' /> Payroll</label>
-            <label><input type='checkbox' name='primary_compliance' value='yes' /> Compliance</label>
-            <label><input type='checkbox' name='primary_billing' value='yes' /> Billing</label>
+          <div class='setup-panel' data-panel-mode='ichra'>
+            <h4>ICHRA Application</h4>
+            <p class='subtitle'>This dashboard captures only ICHRA setup data.</p>
+            <form method='post' action='/employers/create' class='form-grid'>
+              <input type='hidden' name='setup_mode' value='ichra' />
+              <label>Desired ICHRA Start Date *<input type='date' name='ichra_start_date' required /></label>
+              <label>Service Type *
+                <select name='service_type' required>
+                  <option value='ICHRA Documents + Monthly Administration'>ICHRA Documents + Monthly Administration</option>
+                  <option value='ICHRA Documents Only'>ICHRA Documents Only</option>
+                </select>
+              </label>
+              <label>Primary Contact First Name *<input name='primary_first_name' required /></label>
+              <label>Primary Contact Last Name *<input name='primary_last_name' required /></label>
+              <label>Primary Contact Email *<input type='email' name='primary_email' required /></label>
+              <label>Primary Contact Phone *<input name='primary_phone' required /></label>
+              <label>Legal Business Name *<input name='legal_name' required /></label>
+              <label>Nature of Business *<input name='nature_of_business' required /></label>
+              <label>Total Employee Count *<input type='number' name='total_employee_count' required /></label>
+              <label>Physical State *<input name='physical_state' required /></label>
+              <label>Reimbursement Option *<input name='reimbursement_option' required /></label>
+              <label>Employee Class Assistance *<input name='employee_class_assistance' required /></label>
+              <label>Planned Contribution *<input name='planned_contribution' required /></label>
+              <label>Claim Option *<input name='claim_option' required /></label>
+              <label>Agent Support *<input name='agent_support' required /></label>
+              <button type='submit'>Finalize and Submit ICHRA Application</button>
+            </form>
+          </div>
 
-            <h4>Secondary Contact (Click Next to skip)</h4>
-            <label>First<input name='secondary_first_name' /></label>
-            <label>Last<input name='secondary_last_name' /></label>
-            <label>Phone<input name='secondary_phone' /></label>
-            <label>Email<input type='email' name='secondary_email' /></label>
-
-            <h4>ICHRA Welcome Call</h4>
-            <label>Select number of participants<input type='number' min='1' name='welcome_call_participants' /></label>
-
-            <h4>Company Information</h4>
-            <label>Legal Business Name *<input name='legal_name' required /></label>
-            <label>Doing Business As (if applicable)<input name='doing_business_as' /></label>
-            <label>Phone *<input name='phone' required /></label>
-            <label>Nature of Business *<input name='nature_of_business' required /></label>
-            <label>Total Employee Count *<input type='number' name='total_employee_count' required /></label>
-            <label>Total Eligible Employees *<input type='number' name='total_eligible_employees' required /></label>
-            <label>Federal EIN *<input name='federal_ein' required /></label>
-            <label>Corporation Type *<input name='corporation_type' required /></label>
-            <label>LLC Filed As<input name='llc_filed_as' /></label>
-
-            <h4>Address</h4>
-            <label>Physical Address Line 1 *<input name='physical_address_1' required /></label>
-            <label>Physical Address Line 2<input name='physical_address_2' /></label>
-            <label>Physical City *<input name='physical_city' required /></label>
-            <label>Physical State *<input name='physical_state' required /></label>
-            <label>Physical Zip Code *<input name='physical_zip' required /></label>
-            <label>Mailing Address Line 1<input name='mailing_address_1' /></label>
-            <label>Mailing Address Line 2<input name='mailing_address_2' /></label>
-            <label>Mailing City<input name='mailing_city' /></label>
-            <label>Mailing State<input name='mailing_state' /></label>
-            <label>Mailing Zip Code<input name='mailing_zip' /></label>
-            <label>Other participating entities/companies<input name='participating_entities' /></label>
-
-            <h4>ICHRA Setup - Step 1 of 4 - Reimbursements</h4>
-            <label>Which reimbursement option do you want to offer? *<input name='reimbursement_option' required /></label>
-
-            <h4>ICHRA Setup - 2 of 4 - Eligibility</h4>
-            <label>Do you need assistance with employee classes? *<input name='employee_class_assistance' required /></label>
-            <label>New hire eligibility period *<input name='new_hire_eligibility_period' required /></label>
-
-            <h4>ICHRA Setup - 3 of 4 - Contributions</h4>
-            <label>What are you planning to contribute? *<input name='planned_contribution' required /></label>
-            <label>Spouse/Dependent/Family contributions<input name='dependent_contributions' /></label>
-
-            <h4>ICHRA Setup - 4 of 4 - Claim Options</h4>
-            <label>Which claim option would you like to use? *<input name='claim_option' required /></label>
-
-            <h4>Agent Information</h4>
-            <label>Are you working with a health insurance agent? *<input name='agent_support' required /></label>
-
-            <h4>Plan Fee and Ongoing Reimbursements</h4>
-            <label>Please upload completed Bank Authorization (for reference only in this demo)<input type='file' name='bank_authorization_upload' /></label>
-            <label><input type='checkbox' name='terms_agreed' value='yes' required /> I agree to the terms and conditions *</label>
-            <label>Do you have any questions for us?<textarea name='questions_for_team'></textarea></label>
-
-            <button type='submit'>Finalize and Submit ICHRA Application</button>
-          </form>
-          <details class='field-log'>
-            <summary>Field inventory captured from provided source form</summary>
-            <p>Desired start date, service type, primary/secondary contacts, welcome call participants, company information, physical/mailing addresses,
-            participating entities, reimbursement setup, eligibility, contributions, claim options, agent details, bank authorization upload, terms acceptance,
-            final questions, and submit action.</p>
-          </details>
+          <div class='setup-panel' data-panel-mode='basic' hidden>
+            <h4>Basic Employer Application</h4>
+            <p class='subtitle'>Use this for standard employer setup without the full ICHRA workflow.</p>
+            <form method='post' action='/employers/create' class='form-grid'>
+              <input type='hidden' name='setup_mode' value='basic' />
+              <label>Employer Legal Name *<input name='legal_name' required /></label>
+              <label>Primary Contact Name *<input name='contact_name' required /></label>
+              <label>Work Email *<input type='email' name='work_email' required /></label>
+              <label>Phone *<input name='phone' required /></label>
+              <label>Company Size *<input name='company_size' required /></label>
+              <label>Industry *<input name='industry' required /></label>
+              <label>Website *<input name='website' required /></label>
+              <label>State *<input name='state' required /></label>
+              <button type='submit'>Submit Basic Employer Setup</button>
+            </form>
+          </div>
         </section>
         """
 
     def render_employer_settings_link(self, employer_row, role: str) -> str:
         if role not in {"super_admin", "broker", "user"}:
             return "<span class='subtitle'>Read-only</span>"
-        return f"<a class='nav-link' href='/employers/settings?id={employer_row['id']}'>Open settings</a>"
+        return f"<a class='table-link' href='/employers/settings?id={employer_row['id']}'>Open settings</a>"
 
     def render_employer_settings_page(self, start_response, session_user, employer_id: int, flash_message):
         employer = self.get_visible_employer_by_id(session_user, employer_id)
         if not employer:
             return self.redirect(start_response, "/?view=employers", flash=("error", "Employer not found for your access scope."))
 
+        broker_options = "".join(
+            f"<option value='{row['id']}' {'selected' if employer['broker_user_id'] == row['id'] else ''}>{html.escape(row['username'])}</option>"
+            for row in self.get_manageable_brokers(session_user)
+        )
+        primary_candidates = [row for row in self.get_users_with_completion() if row["role"] in {"super_admin", "broker", "user"}]
+        primary_options = "".join(
+            f"<option value='{row['id']}' {'selected' if employer['primary_user_id'] == row['id'] else ''}>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
+            for row in primary_candidates
+        )
+
         body = self.flash_html(flash_message) + f"""
             <section class='card dashboard role-{session_user['role']} theme-{session_user['theme']} density-{session_user['density']}'>
               <header class='dashboard-header'>
                 <div>
                   <h1>Employer Settings</h1>
-                  <p class='subtitle'>Update company profile and employer portal login details.</p>
+                  <p class='subtitle'>Company dashboard for profile, ownership, and portal settings.</p>
                 </div>
                 <a class='nav-link' href='/?view=employers'>Back to Employers</a>
               </header>
-              <section class='section-block'>
-                {self.render_employer_edit_form(employer)}
+              <section class='section-block panel-card'>
+                <h3>Company Snapshot</h3>
+                <div class='stats-grid'>
+                  <article><h4>Legal Name</h4><p>{html.escape(employer['legal_name'])}</p></article>
+                  <article><h4>Primary Contact</h4><p>{html.escape(employer['contact_name'])}</p></article>
+                  <article><h4>Company Size</h4><p>{html.escape(employer['company_size'])}</p></article>
+                  <article><h4>State</h4><p>{html.escape(employer['state'])}</p></article>
+                </div>
+              </section>
+              <section class='section-block panel-card'>
+                {self.render_employer_edit_form(employer, broker_options, primary_options)}
               </section>
             </section>
         """
@@ -1333,9 +1335,10 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_employer_edit_form(self, employer_row) -> str:
+    def render_employer_edit_form(self, employer_row, broker_options: str, primary_options: str) -> str:
         return f"""
         <form method='post' action='/employers/update' class='form-grid employer-settings-form'>
+          <h3>Employer Profile</h3>
           <input type='hidden' name='employer_id' value='{employer_row['id']}' />
           <label>Legal Name<input name='legal_name' value='{html.escape(employer_row['legal_name'])}' required /></label>
           <label>Contact<input name='contact_name' value='{html.escape(employer_row['contact_name'])}' required /></label>
@@ -1346,6 +1349,20 @@ class TaskTrackerApp:
           <label>Website<input name='website' value='{html.escape(employer_row['website'])}' required /></label>
           <label>State<input name='state' value='{html.escape(employer_row['state'])}' required /></label>
           <label>Onboarding Task<textarea name='onboarding_task' required>{html.escape(employer_row['onboarding_task'])}</textarea></label>
+          <h3>Ownership Assignment</h3>
+          <label>Assign Broker
+            <select name='broker_user_id'>
+              <option value=''>Unassigned</option>
+              {broker_options}
+            </select>
+          </label>
+          <label>Assign Primary User
+            <select name='primary_user_id'>
+              <option value=''>Unassigned</option>
+              {primary_options}
+            </select>
+          </label>
+          <h3>Employer Portal Access</h3>
           <label>Portal Username<input name='portal_username' value='{html.escape(employer_row['portal_username'])}' required minlength='3' /></label>
           <label>Portal Password<input name='portal_password' type='password' placeholder='leave blank to keep current password' /></label>
           <button type='submit' class='secondary'>Update Employer</button>
@@ -1379,6 +1396,36 @@ class TaskTrackerApp:
 </head>
 <body>
   <main class='container'>{body}</main>
+  <script>
+    document.querySelectorAll('[data-modal-open]').forEach((button) => {{
+      button.addEventListener('click', () => {{
+        const modal = document.getElementById(button.getAttribute('data-modal-open'));
+        if (modal) {{
+          modal.classList.add('is-open');
+          modal.setAttribute('aria-hidden', 'false');
+        }}
+      }});
+    }});
+    document.querySelectorAll('[data-modal-close]').forEach((button) => {{
+      button.addEventListener('click', () => {{
+        const modal = document.getElementById(button.getAttribute('data-modal-close'));
+        if (modal) {{
+          modal.classList.remove('is-open');
+          modal.setAttribute('aria-hidden', 'true');
+        }}
+      }});
+    }});
+    document.querySelectorAll('[data-setup-mode]').forEach((trigger) => {{
+      trigger.addEventListener('click', () => {{
+        const mode = trigger.getAttribute('data-setup-mode');
+        document.querySelectorAll('.setup-toggle').forEach((item) => item.classList.remove('active'));
+        trigger.classList.add('active');
+        document.querySelectorAll('.setup-panel').forEach((panel) => {{
+          panel.hidden = panel.getAttribute('data-panel-mode') !== mode;
+        }});
+      }});
+    }});
+  </script>
 </body>
 </html>
 """
