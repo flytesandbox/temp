@@ -37,10 +37,12 @@ class TaskTrackerApp:
                 username TEXT NOT NULL UNIQUE,
                 display_name TEXT NOT NULL,
                 password_hash TEXT NOT NULL,
+                password_hint TEXT NOT NULL DEFAULT 'password123',
                 role TEXT NOT NULL DEFAULT 'user',
                 theme TEXT NOT NULL DEFAULT 'default',
                 density TEXT NOT NULL DEFAULT 'comfortable',
-                created_by_user_id INTEGER
+                created_by_user_id INTEGER,
+                last_login_at TEXT
             );
 
             CREATE TABLE IF NOT EXISTS tasks (
@@ -74,28 +76,43 @@ class TaskTrackerApp:
                 broker_user_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS activity_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                actor_user_id INTEGER,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER,
+                target_label TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
 
         columns = {row[1] for row in db.execute("PRAGMA table_info(users)").fetchall()}
         if "role" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'")
+        if "password_hint" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN password_hint TEXT NOT NULL DEFAULT 'password123'")
         if "theme" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default'")
         if "density" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN density TEXT NOT NULL DEFAULT 'comfortable'")
         if "created_by_user_id" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER")
+        if "last_login_at" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
 
         db.executemany(
             """
-            INSERT OR IGNORE INTO users (username, display_name, password_hash, role)
-            VALUES (?, ?, ?, ?)
+            INSERT OR IGNORE INTO users (username, display_name, password_hash, password_hint, role)
+            VALUES (?, ?, ?, ?, ?)
             """,
             [
-                ("alex", "Alex", hash_password("password123"), "user"),
-                ("sam", "Sam", hash_password("password123"), "user"),
-                ("admin", "Super Admin", hash_password("admin123"), "super_admin"),
+                ("alex", "Alex", hash_password("password123"), "password123", "user"),
+                ("sam", "Sam", hash_password("password123"), "password123", "user"),
+                ("admin", "Super Admin", hash_password("admin123"), "admin123", "super_admin"),
             ],
         )
         db.executemany(
@@ -108,6 +125,18 @@ class TaskTrackerApp:
                 (hash_password("password123"), "alex"),
                 (hash_password("password123"), "sam"),
                 (hash_password("admin123"), "admin"),
+            ],
+        )
+        db.executemany(
+            """
+            UPDATE users
+            SET password_hint = ?
+            WHERE username = ?
+            """,
+            [
+                ("password123", "alex"),
+                ("password123", "sam"),
+                ("admin123", "admin"),
             ],
         )
         db.execute("UPDATE users SET role = 'super_admin', created_by_user_id = NULL WHERE username = 'admin'")
@@ -139,7 +168,7 @@ class TaskTrackerApp:
         if path == "/":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            return self.render_dashboard(start_response, session_user, self.consume_flash(cookie), query.get("view", ["dashboard"])[0])
+            return self.render_dashboard(start_response, session_user, self.consume_flash(cookie), query.get("view", ["dashboard"])[0], query)
 
         if path == "/login" and method == "GET":
             return self.render_login(start_response, self.consume_flash(cookie))
@@ -156,6 +185,7 @@ class TaskTrackerApp:
             if session_user["role"] == "employer":
                 return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             self.complete_for_user(session_user["id"], 1)
+            self.log_action(session_user["id"], "task_completed", "task", 1, "Deployment Readiness Task", "Marked complete")
             return self.redirect(start_response, "/", flash=("success", "Task marked complete. Everyone can now see your status."))
 
         if path == "/settings/profile" and method == "POST":
@@ -198,7 +228,15 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/", flash=("error", "Only employer accounts can update applications."))
             complete = self.parse_form(environ).get("status", "") == "complete"
             self.mark_employer_application(session_user["id"], complete)
+            self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], f"status={'complete' if complete else 'incomplete'}")
             return self.redirect(start_response, "/", flash=("success", "Application status updated."))
+
+        if path == "/employers/update" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] not in {"super_admin", "broker", "user"}:
+                return self.redirect(start_response, "/", flash=("error", "You do not have permission to edit employer settings."))
+            return self.handle_update_employer(start_response, session_user, self.parse_form(environ))
 
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found"]
@@ -255,6 +293,69 @@ class TaskTrackerApp:
             ORDER BY u.id
             """
         ).fetchall()
+        db.close()
+        return rows
+
+    def get_login_demo_accounts(self):
+        db = self.db()
+        rows = db.execute(
+            """
+            SELECT username, role, password_hint
+            FROM users
+            WHERE role IN ('super_admin', 'broker', 'user')
+            ORDER BY role, last_login_at DESC, id DESC
+            """
+        ).fetchall()
+        db.close()
+
+        picks = {}
+        for row in rows:
+            if row["role"] not in picks:
+                picks[row["role"]] = row
+        ordered_roles = ["super_admin", "broker", "user"]
+        return [picks[r] for r in ordered_roles if r in picks]
+
+    def log_action(self, actor_user_id: int | None, action: str, entity_type: str, entity_id: int | None, target_label: str, details: str = ""):
+        db = self.db()
+        db.execute(
+            """
+            INSERT INTO activity_logs (actor_user_id, action, entity_type, entity_id, target_label, details)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (actor_user_id, action, entity_type, entity_id, target_label, details),
+        )
+        db.commit()
+        db.close()
+
+    def list_activity_logs(self, filters: dict[str, list[str]]):
+        where = []
+        params = []
+        role = filters.get("role", [""])[0]
+        action = filters.get("action", [""])[0]
+        search = filters.get("q", [""])[0].strip().lower()
+
+        if role:
+            where.append("actor.role = ?")
+            params.append(role)
+        if action:
+            where.append("l.action = ?")
+            params.append(action)
+        if search:
+            where.append("(LOWER(l.target_label) LIKE ? OR LOWER(l.details) LIKE ? OR LOWER(COALESCE(actor.username, 'system')) LIKE ?)")
+            pattern = f"%{search}%"
+            params.extend([pattern, pattern, pattern])
+
+        sql = """
+            SELECT l.*, COALESCE(actor.username, 'system') AS actor_username, COALESCE(actor.role, 'system') AS actor_role
+            FROM activity_logs l
+            LEFT JOIN users actor ON actor.id = l.actor_user_id
+        """
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY l.created_at DESC, l.id DESC LIMIT 200"
+
+        db = self.db()
+        rows = db.execute(sql, params).fetchall()
         db.close()
         return rows
 
@@ -347,8 +448,8 @@ class TaskTrackerApp:
         current = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         new_password = hash_password(password) if password else current["password_hash"]
         db.execute(
-            "UPDATE users SET username = ?, display_name = ?, password_hash = ? WHERE id = ?",
-            (username, username.capitalize(), new_password, user_id),
+            "UPDATE users SET username = ?, display_name = ?, password_hash = ?, password_hint = ? WHERE id = ?",
+            (username, username.capitalize(), new_password, password or current["password_hint"], user_id),
         )
         db.commit()
         db.close()
@@ -362,8 +463,8 @@ class TaskTrackerApp:
     def create_user(self, username: str, password: str, role: str, created_by_user_id: int | None = None):
         db = self.db()
         db.execute(
-            "INSERT INTO users (username, display_name, password_hash, role, created_by_user_id) VALUES (?, ?, ?, ?, ?)",
-            (username, username.capitalize(), hash_password(password), role, created_by_user_id),
+            "INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (username, username.capitalize(), hash_password(password), password, role, created_by_user_id),
         )
         db.commit()
         db.close()
@@ -376,8 +477,8 @@ class TaskTrackerApp:
             raise ValueError("User not found")
         password_hash = hash_password(password) if password else user["password_hash"]
         db.execute(
-            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ? WHERE id = ?",
-            (username, username.capitalize(), role, password_hash, user_id),
+            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ? WHERE id = ?",
+            (username, username.capitalize(), role, password_hash, password or user["password_hint"], user_id),
         )
         db.commit()
         db.close()
@@ -393,10 +494,10 @@ class TaskTrackerApp:
         display_name = form["contact_name"].strip() or form["legal_name"].strip()
         db.execute(
             """
-            INSERT INTO users (username, display_name, password_hash, role, created_by_user_id)
-            VALUES (?, ?, ?, 'employer', ?)
+            INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id)
+            VALUES (?, ?, ?, ?, 'employer', ?)
             """,
-            (username, display_name, hash_password("employer123"), creator_user_id),
+            (username, display_name, hash_password("employer123"), "employer123", creator_user_id),
         )
         linked_user_id = db.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
 
@@ -426,6 +527,38 @@ class TaskTrackerApp:
         db.commit()
         db.close()
         return username
+
+    def update_employer_settings(self, employer_id: int, form: dict[str, str]):
+        db = self.db()
+        db.execute(
+            """
+            UPDATE employers
+            SET legal_name = ?, contact_name = ?, work_email = ?, phone = ?,
+                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?
+            WHERE id = ?
+            """,
+            (
+                form["legal_name"],
+                form["contact_name"],
+                form["work_email"],
+                form["phone"],
+                form["company_size"],
+                form["industry"],
+                form["website"],
+                form["state"],
+                form["onboarding_task"],
+                employer_id,
+            ),
+        )
+        db.commit()
+        db.close()
+
+    def get_visible_employer_by_id(self, session_user, employer_id: int):
+        rows = self.list_visible_employers(session_user)
+        for row in rows:
+            if row["id"] == employer_id:
+                return row
+        return None
 
     def sign(self, value: str) -> str:
         sig = hmac.new(self.secret_key, value.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -461,6 +594,12 @@ class TaskTrackerApp:
         if not user or user["password_hash"] != hash_password(password):
             return self.redirect(start_response, "/login", flash=("error", "Invalid username or password."))
 
+        db = self.db()
+        db.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],))
+        db.commit()
+        db.close()
+        self.log_action(user["id"], "login", "user", user["id"], user["username"], "User signed in")
+
         headers = [
             ("Location", "/"),
             ("Set-Cookie", self.cookie_header("session", self.sign(f"uid:{user['id']}"))),
@@ -480,6 +619,7 @@ class TaskTrackerApp:
 
         try:
             self.update_user_profile(session_user["id"], username, password)
+            self.log_action(session_user["id"], "profile_updated", "user", session_user["id"], username, "Updated profile settings")
         except sqlite3.IntegrityError:
             return self.redirect(start_response, "/", flash=("error", "That username is already in use."))
         return self.redirect(start_response, "/", flash=("success", "Profile updated."))
@@ -490,6 +630,7 @@ class TaskTrackerApp:
         if theme not in ALLOWED_THEMES or density not in ALLOWED_DENSITIES:
             return self.redirect(start_response, "/", flash=("error", "Invalid style settings."))
         self.update_user_style(session_user["id"], theme, density)
+        self.log_action(session_user["id"], "style_updated", "user", session_user["id"], session_user["username"], f"theme={theme},density={density}")
         return self.redirect(start_response, "/", flash=("success", "Dashboard style saved."))
 
     def handle_admin_create_user(self, start_response, session_user, form):
@@ -503,6 +644,7 @@ class TaskTrackerApp:
             return self.redirect(start_response, "/", flash=("error", "New users need a username (3+) and password (6+)."))
         try:
             self.create_user(username, password, role, created_by_user_id=session_user["id"])
+            self.log_action(session_user["id"], "user_created", "user", None, username, f"role={role}")
         except sqlite3.IntegrityError:
             return self.redirect(start_response, "/", flash=("error", "Unable to create user. Username may already exist."))
         return self.redirect(start_response, "/", flash=("success", "User created."))
@@ -523,6 +665,7 @@ class TaskTrackerApp:
 
         try:
             self.admin_update_user(user_id, username, role, password)
+            self.log_action(session_user["id"], "user_updated", "user", user_id, username, f"role={role}")
         except ValueError:
             return self.redirect(start_response, "/", flash=("error", "User no longer exists."))
         except sqlite3.IntegrityError:
@@ -550,11 +693,31 @@ class TaskTrackerApp:
 
         broker_user_id = session_user["id"] if session_user["role"] == "broker" else None
         username = self.create_employer(session_user["id"], form, broker_user_id=broker_user_id)
+        self.log_action(session_user["id"], "employer_created", "employer", None, form["legal_name"].strip(), f"portal_username={username}")
         return self.redirect(
             start_response,
             "/?view=employers",
             flash=("success", f"Employer onboarded. Portal username: {username}, temporary password: employer123"),
         )
+
+    def handle_update_employer(self, start_response, session_user, form):
+        try:
+            employer_id = int(form.get("employer_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=employers", flash=("error", "Invalid employer selected."))
+
+        employer = self.get_visible_employer_by_id(session_user, employer_id)
+        if not employer:
+            return self.redirect(start_response, "/?view=employers", flash=("error", "Employer not found for your access scope."))
+
+        required = ["legal_name", "contact_name", "work_email", "phone", "company_size", "industry", "website", "state", "onboarding_task"]
+        clean = {key: form.get(key, "").strip() for key in required}
+        if any(not clean[key] for key in required):
+            return self.redirect(start_response, "/?view=employers", flash=("error", "All employer settings fields are required."))
+
+        self.update_employer_settings(employer_id, clean)
+        self.log_action(session_user["id"], "employer_updated", "employer", employer_id, clean["legal_name"], "Employer settings updated")
+        return self.redirect(start_response, "/?view=employers", flash=("success", "Employer settings updated."))
 
     def handle_logout(self, start_response):
         headers = [
@@ -592,7 +755,12 @@ class TaskTrackerApp:
         return morsel.OutputString()
 
     def render_login(self, start_response, flash_message):
-        html_body = self.flash_html(flash_message) + """
+        demo_accounts = self.get_login_demo_accounts()
+        demo_rows = "".join(
+            f"<li><code>{html.escape(row['username'])}</code> / <code>{html.escape(row['password_hint'])}</code> <small>({html.escape(row['role'])})</small></li>"
+            for row in demo_accounts
+        )
+        html_body = self.flash_html(flash_message) + f"""
             <section class="card auth-card">
               <p class="eyebrow">Monolith Workspace</p>
               <h1>Log in to continue</h1>
@@ -602,12 +770,8 @@ class TaskTrackerApp:
                 <label>Password <input type="password" name="password" placeholder="password" required /></label>
                 <button type="submit">Log In to Continue</button>
               </form>
-              <div class="hint"><strong>Demo accounts:</strong>
-                <ul>
-                  <li><code>alex</code> / <code>password123</code></li>
-                  <li><code>sam</code> / <code>password123</code></li>
-                  <li><code>admin</code> / <code>admin123</code> (super admin)</li>
-                </ul>
+              <div class="hint"><strong>Active demo accounts (DB-backed):</strong>
+                <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
               </div>
             </section>
             """
@@ -616,7 +780,8 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_dashboard(self, start_response, user, flash_message, active_view="dashboard"):
+    def render_dashboard(self, start_response, user, flash_message, active_view="dashboard", query=None):
+        query = query or {}
         rows = self.get_users_with_completion()
         status_rows = "".join(
             (
@@ -628,6 +793,7 @@ class TaskTrackerApp:
             for row in rows
         )
 
+        role = user["role"]
         employers = self.list_visible_employers(user)
         employer_rows = "".join(
             f"""
@@ -639,14 +805,13 @@ class TaskTrackerApp:
               <td>{html.escape(row['broker_username'] or 'Unassigned')}</td>
               <td>{'Complete' if row['application_complete'] else 'In progress'}</td>
               <td>{html.escape(row['onboarding_task'])}</td>
+              <td>{self.render_employer_update_form(row, role)}</td>
             </tr>
             """
             for row in employers
         )
         if not employer_rows:
-            employer_rows = "<tr><td colspan='7'>No employers available for this account yet.</td></tr>"
-
-        role = user["role"]
+            employer_rows = "<tr><td colspan='8'>No employers available for this account yet.</td></tr>"
         role_title = {
             "super_admin": "Admin Operations Dashboard",
             "broker": "Broker Portfolio Dashboard",
@@ -663,12 +828,15 @@ class TaskTrackerApp:
 
         show_application = role in {"super_admin", "broker", "user"}
         show_settings = role in {"super_admin", "broker", "user"}
+        show_logs = role == "super_admin"
 
         nav_links = [("dashboard", "Dashboard"), ("employers", "Employers")]
         if show_application:
             nav_links.insert(1, ("application", "New Employer Setup"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
+        if show_logs:
+            nav_links.append(("logs", "Activity Log"))
 
         nav_html = "".join(
             f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
@@ -790,8 +958,51 @@ class TaskTrackerApp:
             <section class='section-block'>
               <h3>{'My Employer Application' if role == 'employer' else 'Employer Accounts'}</h3>
               <table class='user-table'>
-                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Application</th><th>Assigned Task</th></tr></thead>
+                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Application</th><th>Assigned Task</th><th>Settings</th></tr></thead>
                 <tbody>{employer_rows}</tbody>
+              </table>
+            </section>
+        """
+
+        logs = self.list_activity_logs(query) if show_logs else []
+        log_rows = "".join(
+            f"<tr><td>{html.escape(row['created_at'])}</td><td>{html.escape(row['actor_username'])}</td><td>{html.escape(row['actor_role'])}</td><td>{html.escape(row['action'])}</td><td>{html.escape(row['target_label'])}</td><td>{html.escape(row['details'] or '')}</td></tr>"
+            for row in logs
+        )
+        if not log_rows:
+            log_rows = "<tr><td colspan='6'>No activity matched the selected filters.</td></tr>"
+
+        logs_panel = f"""
+            <section class='section-block'>
+              <h3>Admin Activity Log</h3>
+              <form method='get' action='/' class='inline-form'>
+                <input type='hidden' name='view' value='logs' />
+                <label>Role
+                  <select name='role'>
+                    <option value=''>All roles</option>
+                    <option value='super_admin' {'selected' if query.get('role', [''])[0] == 'super_admin' else ''}>super_admin</option>
+                    <option value='broker' {'selected' if query.get('role', [''])[0] == 'broker' else ''}>broker</option>
+                    <option value='user' {'selected' if query.get('role', [''])[0] == 'user' else ''}>user</option>
+                    <option value='employer' {'selected' if query.get('role', [''])[0] == 'employer' else ''}>employer</option>
+                  </select>
+                </label>
+                <label>Action
+                  <select name='action'>
+                    <option value=''>All actions</option>
+                    <option value='login' {'selected' if query.get('action', [''])[0] == 'login' else ''}>login</option>
+                    <option value='employer_created' {'selected' if query.get('action', [''])[0] == 'employer_created' else ''}>employer_created</option>
+                    <option value='employer_updated' {'selected' if query.get('action', [''])[0] == 'employer_updated' else ''}>employer_updated</option>
+                    <option value='user_created' {'selected' if query.get('action', [''])[0] == 'user_created' else ''}>user_created</option>
+                    <option value='user_updated' {'selected' if query.get('action', [''])[0] == 'user_updated' else ''}>user_updated</option>
+                    <option value='task_completed' {'selected' if query.get('action', [''])[0] == 'task_completed' else ''}>task_completed</option>
+                  </select>
+                </label>
+                <label>Search <input name='q' value='{html.escape(query.get('q', [''])[0])}' placeholder='target or details' /></label>
+                <button type='submit'>Apply Filters</button>
+              </form>
+              <table class='user-table'>
+                <thead><tr><th>Timestamp</th><th>Actor</th><th>Role</th><th>Action</th><th>Target</th><th>Details</th></tr></thead>
+                <tbody>{log_rows}</tbody>
               </table>
             </section>
         """
@@ -811,6 +1022,7 @@ class TaskTrackerApp:
             "application": self.render_ichra_application_form() if show_application else "",
             "employers": employers_panel,
             "settings": settings_section,
+            "logs": logs_panel if show_logs else "",
         }
         active_panel = panel_lookup.get(active_view, dashboard_panel)
 
@@ -920,6 +1132,25 @@ class TaskTrackerApp:
             final questions, and submit action.</p>
           </details>
         </section>
+        """
+
+    def render_employer_update_form(self, employer_row, role: str) -> str:
+        if role not in {"super_admin", "broker", "user"}:
+            return "<span class='subtitle'>Read-only</span>"
+        return f"""
+        <form method='post' action='/employers/update' class='form-grid employer-settings-form'>
+          <input type='hidden' name='employer_id' value='{employer_row['id']}' />
+          <label>Legal Name<input name='legal_name' value='{html.escape(employer_row['legal_name'])}' required /></label>
+          <label>Contact<input name='contact_name' value='{html.escape(employer_row['contact_name'])}' required /></label>
+          <label>Email<input name='work_email' type='email' value='{html.escape(employer_row['work_email'])}' required /></label>
+          <label>Phone<input name='phone' value='{html.escape(employer_row['phone'])}' required /></label>
+          <label>Size<input name='company_size' value='{html.escape(employer_row['company_size'])}' required /></label>
+          <label>Industry<input name='industry' value='{html.escape(employer_row['industry'])}' required /></label>
+          <label>Website<input name='website' value='{html.escape(employer_row['website'])}' required /></label>
+          <label>State<input name='state' value='{html.escape(employer_row['state'])}' required /></label>
+          <label>Onboarding Task<textarea name='onboarding_task' required>{html.escape(employer_row['onboarding_task'])}</textarea></label>
+          <button type='submit' class='secondary'>Update Employer</button>
+        </form>
         """
 
     def serve_static(self, path: str, start_response):
