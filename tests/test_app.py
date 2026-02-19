@@ -566,6 +566,61 @@ class AppTests(unittest.TestCase):
         self.assertIn("employer_updated", logs_view["body"])
         self.assertIn("Log Target", logs_view["body"])
 
+    def test_employer_update_rejects_duplicate_username_without_partial_save(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Duplicate+One&contact_name=Taylor&work_email=taylor1%40dup.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Fdup.com&state=CO"
+            ),
+            cookie_header=admin_cookie,
+        )
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Duplicate+Two&contact_name=Riley&work_email=riley%40dup.com&phone=777"
+                "&company_size=20&industry=Retail&website=https%3A%2F%2Fduptwo.com&state=WA"
+            ),
+            cookie_header=admin_cookie,
+        )
+
+        db = self.app.db()
+        first = db.execute("SELECT id, linked_user_id FROM employers WHERE legal_name = 'Duplicate One'").fetchone()
+        second = db.execute("SELECT id, linked_user_id, contact_name, phone FROM employers WHERE legal_name = 'Duplicate Two'").fetchone()
+        first_username = db.execute("SELECT username FROM users WHERE id = ?", (first["linked_user_id"],)).fetchone()["username"]
+        db.close()
+
+        update = call_app(
+            self.app,
+            method="POST",
+            path="/employers/update",
+            body=(
+                f"employer_id={second['id']}&legal_name=Duplicate+Two&contact_name=Changed+Name"
+                "&work_email=riley%40dup.com&phone=888&company_size=20&industry=Retail"
+                f"&website=https%3A%2F%2Fduptwo.com&state=WA&onboarding_task=Collect+docs&portal_username={first_username}"
+            ),
+            cookie_header=admin_cookie,
+        )
+
+        self.assertEqual(dict(update["headers"]).get("Location"), f"/employers/settings?id={second['id']}")
+        admin_cookie = merge_cookies(admin_cookie, update["headers"])
+
+        follow = call_app(self.app, method="GET", path="/employers/settings", query_string=f"id={second['id']}", cookie_header=admin_cookie)
+        self.assertIn("Employer username is already in use.", follow["body"])
+
+        db = self.app.db()
+        second_after = db.execute("SELECT contact_name, phone FROM employers WHERE id = ?", (second["id"],)).fetchone()
+        db.close()
+        self.assertEqual(second_after["contact_name"], second["contact_name"])
+        self.assertEqual(second_after["phone"], second["phone"])
+
 
     def test_employer_list_links_to_settings_page(self):
         admin_cookie = ""
