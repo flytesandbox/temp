@@ -225,7 +225,8 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertNotIn("User Settings", dashboard["body"])
         self.assertNotIn("Admin · Account Management", dashboard["body"])
-        self.assertIn("Employers", dashboard["body"])
+        self.assertIn("Applications", dashboard["body"])
+        self.assertNotIn("href='/?view=employers'", dashboard["body"])
 
     def test_employer_visibility_is_limited_to_creator_scope(self):
         alex_cookie = ""
@@ -320,6 +321,64 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=broker_cookie)
         self.assertIn("Broker Client", dashboard["body"])
         self.assertIn("broker2", dashboard["body"])
+
+    def test_team_tab_exists_and_contains_user_management(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        self.assertIn("Team", view["body"])
+        self.assertIn("Account Management", view["body"])
+
+    def test_broker_referral_notifies_employer_and_sets_ichra_started(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokerref&password=user&role=broker",
+            cookie_header=admin_cookie,
+        )
+
+        broker_cookie = ""
+        broker_cookie = merge_cookies(broker_cookie, call_app(self.app, method="POST", path="/login", body="username=brokerref&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Invite+Co&contact_name=Robin&work_email=robin%40invite.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Finvite.com&state=WA"
+            ),
+            cookie_header=broker_cookie,
+        )
+
+        db = self.app.db()
+        employer = db.execute("SELECT id, linked_user_id FROM employers WHERE legal_name = 'Invite Co'").fetchone()
+        db.close()
+
+        refer = call_app(
+            self.app,
+            method="POST",
+            path="/employers/refer",
+            body=f"employer_id={employer['id']}",
+            cookie_header=broker_cookie,
+        )
+        self.assertEqual(dict(refer["headers"]).get("Location"), "/")
+
+        employer_cookie = ""
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE id = ?", (employer["linked_user_id"],)).fetchone()
+        db.close()
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        self.assertIn("Finish ICHRA Setup Application", dashboard["body"])
+        notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=employer_cookie)
+        self.assertIn("ready and waiting for you to finish", notifications["body"])
 
     def test_employer_can_mark_application_complete(self):
         cookie = ""

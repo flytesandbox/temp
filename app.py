@@ -104,6 +104,7 @@ class TaskTrackerApp:
                 website TEXT NOT NULL,
                 state TEXT NOT NULL,
                 onboarding_task TEXT NOT NULL,
+                ichra_started INTEGER NOT NULL DEFAULT 0,
                 application_complete INTEGER NOT NULL DEFAULT 0,
                 linked_user_id INTEGER NOT NULL UNIQUE,
                 created_by_user_id INTEGER NOT NULL,
@@ -190,6 +191,8 @@ class TaskTrackerApp:
         employer_columns = {row[1] for row in db.execute("PRAGMA table_info(employers)").fetchall()}
         if "application_complete" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN application_complete INTEGER NOT NULL DEFAULT 0")
+        if "ichra_started" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN ichra_started INTEGER NOT NULL DEFAULT 0")
         if "broker_user_id" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
         if "primary_user_id" not in employer_columns:
@@ -281,6 +284,22 @@ class TaskTrackerApp:
             self.mark_employer_application(session_user["id"], complete)
             self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], f"status={'complete' if complete else 'incomplete'}")
             return self.redirect(start_response, "/", flash=("success", "ICHRA setup status updated."))
+
+        if path == "/employers/start-ichra" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "employer":
+                return self.redirect(start_response, "/", flash=("error", "Only employer accounts can start ICHRA setup."))
+            self.start_employer_ichra(session_user["id"])
+            self.log_action(session_user["id"], "ichra_started", "employer", session_user["id"], session_user["username"], "Employer started ICHRA setup")
+            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application started."))
+
+        if path == "/employers/refer" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "broker":
+                return self.redirect(start_response, "/", flash=("error", "Only brokers can refer clients."))
+            return self.handle_broker_refer_client(start_response, session_user, self.parse_form(environ))
 
         if path == "/notifications/seen" and method == "POST":
             if not session_user:
@@ -547,12 +566,29 @@ class TaskTrackerApp:
 
     def mark_employer_application(self, employer_user_id: int, complete: bool):
         db = self.db()
-        db.execute("UPDATE employers SET application_complete = ? WHERE linked_user_id = ?", (1 if complete else 0, employer_user_id))
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = ? WHERE linked_user_id = ?", (1 if complete else 0, employer_user_id))
         employer = db.execute("SELECT legal_name, primary_user_id FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
         db.commit()
         db.close()
         if complete and employer and employer["primary_user_id"]:
             self.create_notification(employer["primary_user_id"], f"ICHRA setup completed by {employer['legal_name']}.")
+
+    def start_employer_ichra(self, employer_user_id: int):
+        db = self.db()
+        db.execute("UPDATE employers SET ichra_started = 1 WHERE linked_user_id = ?", (employer_user_id,))
+        db.commit()
+        db.close()
+
+    def refer_client_ichra(self, employer_id: int):
+        db = self.db()
+        employer = db.execute("SELECT id, legal_name, linked_user_id FROM employers WHERE id = ?", (employer_id,)).fetchone()
+        if not employer:
+            db.close()
+            return None
+        db.execute("UPDATE employers SET ichra_started = 1 WHERE id = ?", (employer_id,))
+        db.commit()
+        db.close()
+        return employer
 
     def complete_for_user(self, user_id: int, task_id: int):
         db = self.db()
@@ -624,8 +660,8 @@ class TaskTrackerApp:
             """
             INSERT INTO employers (
                 legal_name, contact_name, work_email, phone, company_size,
-                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                industry, website, state, onboarding_task, ichra_started, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 form["legal_name"].strip(),
@@ -637,6 +673,7 @@ class TaskTrackerApp:
                 form["website"].strip(),
                 form["state"].strip(),
                 "Complete benefits roster import and confirm renewal month.",
+                0,
                 0,
                 linked_user_id,
                 creator_user_id,
@@ -822,6 +859,7 @@ class TaskTrackerApp:
             employer = self.get_visible_employer_by_id(session_user, existing_employer_id)
             if not employer:
                 return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
+            self.start_employer_ichra(employer["linked_user_id"])
             self.mark_employer_application(employer["linked_user_id"], False)
             self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup application submitted")
             self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup application submitted.")
@@ -855,6 +893,21 @@ class TaskTrackerApp:
             "/?view=employers",
             flash=("success", f"Employer created from Basic Employer Setup. Portal username: {username}, temporary password: user"),
         )
+
+    def handle_broker_refer_client(self, start_response, session_user, form):
+        try:
+            employer_id = int(form.get("employer_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/", flash=("error", "Select an employer to refer."))
+        employer = self.get_visible_employer_by_id(session_user, employer_id)
+        if not employer:
+            return self.redirect(start_response, "/", flash=("error", "Employer not found for your broker portfolio."))
+        employer_row = self.refer_client_ichra(employer_id)
+        if not employer_row:
+            return self.redirect(start_response, "/", flash=("error", "Employer not found."))
+        self.create_notification(employer_row["linked_user_id"], "Your ICHRA setup application is ready and waiting for you to finish.")
+        self.log_action(session_user["id"], "ichra_referred", "employer", employer_id, employer_row["legal_name"], "Broker referred client for ICHRA setup")
+        return self.redirect(start_response, "/", flash=("success", f"Invitation sent to {employer_row['legal_name']}."))
 
     def handle_update_employer(self, start_response, session_user, form):
         try:
@@ -1044,15 +1097,22 @@ class TaskTrackerApp:
         }.get(role, "")
 
         show_application = role in {"super_admin", "admin", "broker"}
-        show_settings = role in {"super_admin", "admin", "broker"}
+        show_settings = role in {"super_admin", "admin", "broker", "employer"}
         show_logs = role == "super_admin"
 
         notifications = self.list_notifications(user["id"])
         unseen_count = sum(1 for item in notifications if not item["seen"])
+        employer_profile = employers[0] if role == "employer" and employers else None
 
-        nav_links = [("dashboard", "Dashboard"), ("employers", "Employers"), ("notifications", f"Notifications {'⚠️' if unseen_count else ''}")]
+        nav_links = [("dashboard", "Dashboard")]
+        if role in {"super_admin", "admin", "broker"}:
+            nav_links.append(("employers", "Employers"))
+        if role == "employer":
+            nav_links.append(("applications", "Applications"))
         if show_application:
             nav_links.insert(1, ("application", "ICHRA Setup Application"))
+        nav_links.append(("team", "Team"))
+        nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         nav_links.append(("devlog", "Dev Log"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
@@ -1068,28 +1128,32 @@ class TaskTrackerApp:
         if role in {"super_admin", "admin", "broker"}:
             task_section = """
               <article class='task-card'>
-                <h2>Deployment Readiness Task</h2>
-                <p>Confirm the app works in Codespaces and on Linode.</p>
-                <form method='post' action='/task/complete'><button type='submit'>Mark My Task Complete</button></form>
+                <h2>Workflow Focus</h2>
+                <p>Use this dashboard to monitor key progress and take your highest-impact next step.</p>
               </article>
             """
 
-        employer_workspace = ""
-        if role == "employer":
-            employer_workspace = """
+        broker_refer_cta = ""
+        if role == "broker":
+            referable = [row for row in employers if not row["application_complete"]]
+            options = "".join(
+                f"<option value='{row['id']}'>{html.escape(row['legal_name'])}</option>"
+                for row in referable
+            )
+            broker_refer_cta = f"""
               <section class='section-block'>
-                <h3>Application Workflow</h3>
-                <p class='subtitle'>Use these actions to keep your employer application up to date.</p>
-                <form method='post' action='/employers/application' class='inline-form'>
-                  <input type='hidden' name='status' value='incomplete' />
-                  <button type='submit' class='secondary'>Mark Application Incomplete</button>
-                </form>
-                <form method='post' action='/employers/application' class='inline-form'>
-                  <input type='hidden' name='status' value='complete' />
-                  <button type='submit'>Complete Application</button>
+                <h3>Client Referrals</h3>
+                <p class='subtitle'>Send an ICHRA setup invitation to an employer in your book.</p>
+                <form method='post' action='/employers/refer' class='inline-form'>
+                  <select name='employer_id' {'disabled' if not options else ''}>
+                    {options or "<option value=''>No eligible employers</option>"}
+                  </select>
+                  <button type='submit' {'disabled' if not options else ''}>Refer a Client</button>
                 </form>
               </section>
             """
+
+        employer_workspace = ""
 
         broker_admin_section = ""
         if role in {"super_admin", "admin", "broker"}:
@@ -1139,7 +1203,7 @@ class TaskTrackerApp:
             """
 
         settings_section = "<section class='section-block'><p class='subtitle'>This account has no editable settings.</p></section>"
-        if show_settings:
+        if role in {"super_admin", "admin", "broker"}:
             settings_section = f"""
               <section class='section-block settings-grid'>
                 <div>
@@ -1211,6 +1275,58 @@ class TaskTrackerApp:
             </section>
         """
 
+        team_panel = f"""
+            <section class='section-block'>
+              <h3>Team Completion Status</h3>
+              <ul class='status-list'>{status_rows}</ul>
+            </section>
+            {broker_admin_section}
+        """
+
+        employer_applications_panel = ""
+        header_primary_cta = ""
+        if role == "employer" and employer_profile:
+            ichra_status = "Complete" if employer_profile["application_complete"] else ("In progress" if employer_profile["ichra_started"] else "Not started")
+            employer_applications_panel = f"""
+                <section class='section-block'>
+                  <h3>Applications</h3>
+                  <div class='table-wrap'><table class='user-table'>
+                    <thead><tr><th>Application</th><th>Status</th><th>Current Action</th></tr></thead>
+                    <tbody>
+                      <tr><td>Initial Employer Setup</td><td>Submitted</td><td>Review details in Dev Log and Notifications.</td></tr>
+                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td>{html.escape(employer_profile['onboarding_task'])}</td></tr>
+                    </tbody>
+                  </table></div>
+                </section>
+                <section class='section-block'>
+                  <h3>Application Workflow</h3>
+                  <form method='post' action='/employers/application' class='inline-form'>
+                    <input type='hidden' name='status' value='incomplete' />
+                    <button type='submit' class='secondary'>Mark Application Incomplete</button>
+                  </form>
+                  <form method='post' action='/employers/application' class='inline-form'>
+                    <input type='hidden' name='status' value='complete' />
+                    <button type='submit'>Complete Application</button>
+                  </form>
+                </section>
+            """
+
+            if not employer_profile["ichra_started"]:
+                header_primary_cta = """
+                    <form method='post' action='/employers/start-ichra'>
+                      <button type='submit'>Start ICHRA Setup Application</button>
+                    </form>
+                """
+            elif not employer_profile["application_complete"]:
+                header_primary_cta = """
+                    <a class='nav-link active' href='/?view=applications'>Finish ICHRA Setup Application</a>
+                """
+            else:
+                header_primary_cta = "<span class='nav-link active'>ICHRA Setup Complete</span>"
+
+        if role == "broker":
+            header_primary_cta = "<a class='nav-link active' href='/?view=dashboard'>Refer a Client</a>"
+
         logs = self.list_activity_logs(query) if show_logs else []
         log_rows = "".join(
             f"<tr><td>{html.escape(row['created_at'])}</td><td>{html.escape(row['actor_username'])}</td><td>{html.escape(row['actor_role'])}</td><td>{html.escape(row['action'])}</td><td>{html.escape(row['target_label'])}</td><td>{html.escape(row['details'] or '')}</td></tr>"
@@ -1272,18 +1388,24 @@ class TaskTrackerApp:
 
         dashboard_panel = f"""
             {task_section}
+            {broker_refer_cta}
             <section class='section-block'>
-              <h3>Team Completion Status</h3>
-              <ul class='status-list'>{status_rows}</ul>
+              <h3>Workflow Snapshot</h3>
+              <div class='stats-grid'>
+                <article><h4>Employers</h4><p>{len(employers)}</p></article>
+                <article><h4>Applications Complete</h4><p>{sum(1 for row in employers if row['application_complete'])}</p></article>
+                <article><h4>Unread Notifications</h4><p>{unseen_count}</p></article>
+              </div>
             </section>
             {employer_workspace}
-            {broker_admin_section}
         """
 
         panel_lookup = {
             "dashboard": dashboard_panel,
+            "team": team_panel,
             "application": self.render_ichra_application_form(user) if show_application else "",
             "employers": employers_panel,
+            "applications": employer_applications_panel if role == "employer" else employers_panel,
             "notifications": notifications_panel,
             "devlog": devlog_panel,
             "settings": settings_section,
@@ -1303,6 +1425,7 @@ class TaskTrackerApp:
                   <h1>{html.escape(role_title)}</h1>
                   <p class='subtitle'>Welcome, {html.escape(user['display_name'])}</p>
                 </div>
+                {header_primary_cta}
                 <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
               </header>
               <nav class='dashboard-nav'>{nav_html}</nav>
