@@ -80,6 +80,18 @@ class AppTests(unittest.TestCase):
         headers = dict(result["headers"])
         self.assertEqual(headers.get("Location"), "/")
 
+    def test_login_session_cookie_allows_immediate_dashboard_access(self):
+        cookie = ""
+
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
+        self.assertTrue(login["status"].startswith("302"))
+        self.assertEqual(dict(login["headers"]).get("Location"), "/")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
+        self.assertTrue(dashboard["status"].startswith("200"))
+        self.assertIn("Welcome, Alex", dashboard["body"])
+
     def test_two_users_see_shared_task_completion(self):
         alex_cookie = ""
         sam_cookie = ""
