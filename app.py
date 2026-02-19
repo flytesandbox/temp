@@ -75,6 +75,15 @@ class TaskTrackerApp:
                 linked_user_id INTEGER NOT NULL UNIQUE,
                 created_by_user_id INTEGER NOT NULL,
                 broker_user_id INTEGER,
+                primary_user_id INTEGER,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                seen INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -149,6 +158,8 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE employers ADD COLUMN application_complete INTEGER NOT NULL DEFAULT 0")
         if "broker_user_id" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
+        if "primary_user_id" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN primary_user_id INTEGER")
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -178,6 +189,9 @@ class TaskTrackerApp:
 
         if path == "/login" and method == "POST":
             return self.handle_login(start_response, self.parse_form(environ))
+
+        if path == "/signup" and method == "POST":
+            return self.handle_public_employer_signup(start_response, self.parse_form(environ))
 
         if path == "/logout" and method == "POST":
             return self.handle_logout(start_response)
@@ -232,7 +246,12 @@ class TaskTrackerApp:
             complete = self.parse_form(environ).get("status", "") == "complete"
             self.mark_employer_application(session_user["id"], complete)
             self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], f"status={'complete' if complete else 'incomplete'}")
-            return self.redirect(start_response, "/", flash=("success", "Application status updated."))
+            return self.redirect(start_response, "/", flash=("success", "ICHRA setup status updated."))
+
+        if path == "/notifications/seen" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_mark_notification_seen(start_response, session_user, self.parse_form(environ))
 
         if path == "/employers/settings" and method == "GET":
             if not session_user:
@@ -445,11 +464,46 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+    def list_notifications(self, user_id: int):
+        db = self.db()
+        rows = db.execute(
+            "SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC, id DESC",
+            (user_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
+    def create_notification(self, user_id: int, message: str):
+        db = self.db()
+        db.execute("INSERT INTO notifications (user_id, message) VALUES (?, ?)", (user_id, message))
+        db.commit()
+        db.close()
+
+    def mark_notification_seen(self, user_id: int, notification_id: int):
+        db = self.db()
+        db.execute("UPDATE notifications SET seen = 1 WHERE id = ? AND user_id = ?", (notification_id, user_id))
+        db.commit()
+        db.close()
+
+    def find_default_primary_user_id(self, db, creator_user_id: int, broker_user_id: int | None):
+        if broker_user_id:
+            row = db.execute("SELECT id FROM users WHERE id = ?", (broker_user_id,)).fetchone()
+            if row:
+                return row["id"]
+        row = db.execute("SELECT id FROM users WHERE id = ?", (creator_user_id,)).fetchone()
+        if row:
+            return row["id"]
+        admin = db.execute("SELECT id FROM users WHERE role = 'super_admin' ORDER BY id LIMIT 1").fetchone()
+        return admin["id"] if admin else None
+
     def mark_employer_application(self, employer_user_id: int, complete: bool):
         db = self.db()
         db.execute("UPDATE employers SET application_complete = ? WHERE linked_user_id = ?", (1 if complete else 0, employer_user_id))
+        employer = db.execute("SELECT legal_name, primary_user_id FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
         db.commit()
         db.close()
+        if complete and employer and employer["primary_user_id"]:
+            self.create_notification(employer["primary_user_id"], f"ICHRA setup completed by {employer['legal_name']}.")
 
     def complete_for_user(self, user_id: int, task_id: int):
         db = self.db()
@@ -515,12 +569,14 @@ class TaskTrackerApp:
         )
         linked_user_id = db.execute("SELECT last_insert_rowid() AS i").fetchone()["i"]
 
+        primary_user_id = self.find_default_primary_user_id(db, creator_user_id, broker_user_id)
+
         db.execute(
             """
             INSERT INTO employers (
                 legal_name, contact_name, work_email, phone, company_size,
-                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 form["legal_name"].strip(),
@@ -536,6 +592,7 @@ class TaskTrackerApp:
                 linked_user_id,
                 creator_user_id,
                 broker_user_id,
+                primary_user_id,
             ),
         )
         db.commit()
@@ -701,6 +758,7 @@ class TaskTrackerApp:
     def handle_create_employer(self, start_response, session_user, form):
         if session_user["role"] == "employer":
             return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
+        mode = form.get("setup_mode", "ichra")
 
         if not form.get("contact_name", "").strip():
             primary_first = form.get("primary_first_name", "").strip()
@@ -720,10 +778,11 @@ class TaskTrackerApp:
         broker_user_id = session_user["id"] if session_user["role"] == "broker" else None
         username = self.create_employer(session_user["id"], form, broker_user_id=broker_user_id)
         self.log_action(session_user["id"], "employer_created", "employer", None, form["legal_name"].strip(), f"portal_username={username}")
+        self.create_notification(session_user["id"], f"{form['legal_name'].strip()} {('ICHRA setup application' if mode == 'ichra' else 'basic employer setup')} submitted.")
         return self.redirect(
             start_response,
             "/?view=employers",
-            flash=("success", f"Employer onboarded. Portal username: {username}, temporary password: user"),
+            flash=("success", f"Employer created from {'ICHRA Setup Application' if mode == 'ichra' else 'Basic Employer Setup'}. Portal username: {username}, temporary password: user"),
         )
 
     def handle_update_employer(self, start_response, session_user, form):
@@ -751,6 +810,35 @@ class TaskTrackerApp:
         self.update_employer_settings(employer_id, clean)
         self.log_action(session_user["id"], "employer_updated", "employer", employer_id, clean["legal_name"], "Employer settings updated")
         return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("success", "Employer settings updated."))
+
+    def handle_public_employer_signup(self, start_response, form):
+        form["contact_name"] = form.get("prospect_name", "")
+        form["work_email"] = form.get("prospect_email", "")
+        form["phone"] = form.get("prospect_phone", "") or "Not provided"
+        form["company_size"] = form.get("company_size", "") or "Unknown"
+        form["industry"] = form.get("industry", "") or "Unknown"
+        form["website"] = form.get("website", "") or "Not provided"
+        form["state"] = form.get("state", "") or "Unknown"
+
+        required = ["legal_name", "contact_name", "work_email"]
+        if any(not form.get(name, "").strip() for name in required):
+            return self.redirect(start_response, "/login", flash=("error", "Please complete employer name, contact, and email."))
+
+        portal_username = self.create_employer(creator_user_id=1, form=form, broker_user_id=None)
+        self.log_action(None, "employer_signup_requested", "employer", None, form["legal_name"].strip(), f"portal_username={portal_username}")
+        return self.redirect(
+            start_response,
+            "/login",
+            flash=("success", "Employer request submitted. Use provided portal credentials after ICHRA setup is completed."),
+        )
+
+    def handle_mark_notification_seen(self, start_response, session_user, form):
+        try:
+            notification_id = int(form.get("notification_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=notifications", flash=("error", "Invalid notification."))
+        self.mark_notification_seen(session_user["id"], notification_id)
+        return self.redirect(start_response, "/?view=notifications", flash=("success", "Notification marked as seen."))
 
     def handle_logout(self, start_response):
         headers = [
@@ -806,6 +894,16 @@ class TaskTrackerApp:
               <div class="hint"><strong>Active demo accounts (DB-backed):</strong>
                 <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
               </div>
+              <hr />
+              <h2>Prospective Employer Sign Up</h2>
+              <p class="subtitle">Public form for employers needing a basic employer setup request.</p>
+              <form method="post" action="/signup" class="form-grid">
+                <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
+                <label>Contact Name <input type="text" name="prospect_name" required /></label>
+                <label>Work Email <input type="email" name="prospect_email" required /></label>
+                <label>Phone <input type="text" name="prospect_phone" /></label>
+                <button type="submit" class="secondary">Submit Employer Request</button>
+              </form>
             </section>
             """
         html_doc = self.html_page("Monolith Task Tracker", html_body)
@@ -863,9 +961,12 @@ class TaskTrackerApp:
         show_settings = role in {"super_admin", "broker", "user"}
         show_logs = role == "super_admin"
 
-        nav_links = [("dashboard", "Dashboard"), ("employers", "Employers")]
+        notifications = self.list_notifications(user["id"])
+        unseen_count = sum(1 for item in notifications if not item["seen"])
+
+        nav_links = [("dashboard", "Dashboard"), ("employers", "Employers"), ("notifications", f"Notifications {'⚠️' if unseen_count else ''}")]
         if show_application:
-            nav_links.insert(1, ("application", "New Employer Setup"))
+            nav_links.insert(1, ("application", "ICHRA Setup Application"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
         if show_logs:
@@ -986,9 +1087,34 @@ class TaskTrackerApp:
               </section>
             """
 
+        notification_rows = "".join(
+            f"""
+            <li>
+              <form method='post' action='/notifications/seen' class='notification-item'>
+                <input type='hidden' name='notification_id' value='{row['id']}' />
+                <label class='check-row'>
+                  <input type='checkbox' name='seen' {'checked' if row['seen'] else ''} {'disabled' if row['seen'] else ''} onchange='if(!this.disabled) this.form.submit()' />
+                  <span>{html.escape(row['message'])}</span>
+                </label>
+                <small>{html.escape(row['created_at'])}</small>
+              </form>
+            </li>
+            """
+            for row in notifications
+        )
+        if not notification_rows:
+            notification_rows = "<li class='subtitle'>No notifications yet.</li>"
+
+        notifications_panel = f"""
+            <section class='section-block'>
+              <h3>Notifications</h3>
+              <ul class='status-list notifications-list'>{notification_rows}</ul>
+            </section>
+        """
+
         employers_panel = f"""
             <section class='section-block'>
-              <h3>{'My Employer Application' if role == 'employer' else 'Employer Accounts'}</h3>
+              <h3>{'My ICHRA Setup Application' if role == 'employer' else 'Employer Accounts'}</h3>
               <div class='table-wrap'><table class='user-table'>
                 <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Application</th><th>Assigned Task</th><th>Settings</th></tr></thead>
                 <tbody>{employer_rows}</tbody>
@@ -1054,6 +1180,7 @@ class TaskTrackerApp:
             "dashboard": dashboard_panel,
             "application": self.render_ichra_application_form() if show_application else "",
             "employers": employers_panel,
+            "notifications": notifications_panel,
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",
         }
@@ -1085,10 +1212,16 @@ class TaskTrackerApp:
     def render_ichra_application_form(self):
         return """
         <section class='section-block'>
-          <h3>Welcome to your ICHRA Application!</h3>
+          <h3>ICHRA Setup Application</h3>
           <p class='subtitle'>(takes 5 - 10 minutes to complete)</p>
-          <p class='subtitle'>This recreates every field from the source application and keeps the long form in its own navigation tab.</p>
+          <p class='subtitle'>Used to sign an employer up for ICHRA once the employer record already exists.</p>
           <form method='post' action='/employers/create' class='form-grid'>
+            <label>Setup Type *
+              <select name='setup_mode'>
+                <option value='ichra'>ICHRA Setup Application</option>
+                <option value='basic'>Basic Employer Setup</option>
+              </select>
+            </label>
             <h4>Desired ICHRA Start Date *</h4><input type='date' name='ichra_start_date' required />
             <h4>Which service are you signing up for? *</h4>
             <label><input type='radio' name='service_type' value='ICHRA Documents + Monthly Administration' required /> ICHRA Documents + Monthly Administration</label>
