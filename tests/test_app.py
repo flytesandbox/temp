@@ -50,106 +50,105 @@ class AppTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def login(self, username, password):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body=f"username={username}&password={password}")
+        self.assertEqual(dict(login["headers"]).get("Location"), "/")
+        return merge_cookies(cookie, login["headers"])
+
     def test_login_required_redirects_to_login(self):
         response = call_app(self.app, method="GET", path="/")
         self.assertTrue(response["status"].startswith("302"))
-        headers = dict(response["headers"])
-        self.assertEqual(headers.get("Location"), "/login")
+        self.assertEqual(dict(response["headers"]).get("Location"), "/login")
 
-    def test_regular_user_can_update_username_and_password(self):
-        cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
-        cookie = merge_cookies(cookie, login["headers"])
-
-        update = call_app(
-            self.app,
-            method="POST",
-            path="/settings/profile",
-            body="username=alex2&password=betterpw",
-            cookie_header=cookie,
+    def test_non_employer_can_create_employer_from_onboarding_form(self):
+        cookie = self.login("alex", "password123")
+        form = (
+            "legal_name=Acme+Health&contact_name=Jamie+Lee&work_email=jamie%40acme.com"
+            "&phone=555-111-0000&company_size=25-49&industry=Healthcare"
+            "&website=https%3A%2F%2Facme.com&state=CA"
         )
-        self.assertEqual(dict(update["headers"]).get("Location"), "/")
+        create = call_app(self.app, method="POST", path="/employers/create", body=form, cookie_header=cookie)
+        self.assertEqual(dict(create["headers"]).get("Location"), "/")
 
-        relogin = call_app(self.app, method="POST", path="/login", body="username=alex2&password=betterpw")
-        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+        db = self.app.db()
+        employer = db.execute("SELECT * FROM employers WHERE legal_name = 'Acme Health'").fetchone()
+        self.assertIsNotNone(employer)
+        linked = db.execute("SELECT * FROM users WHERE id = ?", (employer["linked_user_id"],)).fetchone()
+        self.assertEqual(linked["role"], "employer")
+        db.close()
 
-    def test_regular_user_can_customize_dashboard_style(self):
-        cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=sam&password=password123")
-        cookie = merge_cookies(cookie, login["headers"])
-
-        style = call_app(
-            self.app,
-            method="POST",
-            path="/settings/style",
-            body="theme=midnight&density=compact",
-            cookie_header=cookie,
-        )
-        cookie = merge_cookies(cookie, style["headers"])
-
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertIn("theme-midnight", dashboard["body"])
-        self.assertIn("density-compact", dashboard["body"])
-
-    def test_super_admin_can_create_and_modify_users(self):
-        cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")
-        cookie = merge_cookies(cookie, login["headers"])
-
+    def test_employer_accounts_are_read_only_and_cannot_create(self):
+        creator_cookie = self.login("alex", "password123")
         create = call_app(
             self.app,
             method="POST",
-            path="/admin/users/create",
-            body="username=river&password=riverpass&role=user",
-            cookie_header=cookie,
+            path="/employers/create",
+            body=(
+                "legal_name=North+Star&contact_name=Ari+B&work_email=ari%40northstar.com&phone=555"
+                "&company_size=1-24&industry=Tech&website=https%3A%2F%2Fnorthstar.com&state=WA"
+            ),
+            cookie_header=creator_cookie,
         )
-        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+        creator_cookie = merge_cookies(creator_cookie, create["headers"])
 
-        users = self.app.get_users_with_completion()
-        river = next(u for u in users if u["username"] == "river")
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role = 'employer' LIMIT 1").fetchone()
+        db.close()
+        employer_cookie = self.login(employer_user["username"], "employer123")
 
-        update = call_app(
+        forbidden = call_app(
             self.app,
             method="POST",
-            path="/admin/users/update",
-            body=f"user_id={river['id']}&username=river2&role=super_admin&password=",
-            cookie_header=cookie,
+            path="/employers/create",
+            body=(
+                "legal_name=Should+Fail&contact_name=Nope&work_email=nope%40x.com&phone=555"
+                "&company_size=1-24&industry=Nope&website=https%3A%2F%2Fx.com&state=OR"
+            ),
+            cookie_header=employer_cookie,
         )
-        self.assertEqual(dict(update["headers"]).get("Location"), "/")
+        self.assertEqual(dict(forbidden["headers"]).get("Location"), "/")
 
-        relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=riverpass")
-        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        self.assertIn("read-only", dashboard["body"])
+        self.assertNotIn("Employer onboarding form", dashboard["body"])
 
-    def test_regular_user_cannot_create_or_modify_users(self):
-        cookie = ""
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
-        cookie = merge_cookies(cookie, login["headers"])
+    def test_employer_visibility_is_limited_to_creator_scope(self):
+        alex_cookie = self.login("alex", "password123")
+        sam_cookie = self.login("sam", "password123")
 
-        create = call_app(
+        call_app(
             self.app,
             method="POST",
-            path="/admin/users/create",
-            body="username=hacker&password=hackerpw&role=user",
-            cookie_header=cookie,
+            path="/employers/create",
+            body=(
+                "legal_name=Atlas+One&contact_name=A1&work_email=a1%40atlas.com&phone=555"
+                "&company_size=1-24&industry=Tech&website=https%3A%2F%2Fatlas.com&state=CA"
+            ),
+            cookie_header=alex_cookie,
         )
-        cookie = merge_cookies(cookie, create["headers"])
-        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Beta+Care&contact_name=B1&work_email=b1%40beta.com&phone=555"
+                "&company_size=25-49&industry=Medical&website=https%3A%2F%2Fbeta.com&state=TX"
+            ),
+            cookie_header=sam_cookie,
+        )
 
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertNotIn("hacker", dashboard["body"])
-        self.assertIn("Team Completion Status", dashboard["body"])
+        db = self.app.db()
+        employer_user = db.execute(
+            "SELECT username FROM users WHERE role = 'employer' AND created_by_user_id = (SELECT id FROM users WHERE username='alex') LIMIT 1"
+        ).fetchone()
+        db.close()
 
-    def test_login_session_cookie_allows_immediate_dashboard_access(self):
-        cookie = ""
+        employer_cookie = self.login(employer_user["username"], "employer123")
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
 
-        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=password123")
-        self.assertTrue(login["status"].startswith("302"))
-        self.assertEqual(dict(login["headers"]).get("Location"), "/")
-        cookie = merge_cookies(cookie, login["headers"])
-
-        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie)
-        self.assertTrue(dashboard["status"].startswith("200"))
-        self.assertIn("Welcome, Alex", dashboard["body"])
+        self.assertIn("Atlas One", dashboard["body"])
+        self.assertNotIn("Beta Care", dashboard["body"])
 
 
 if __name__ == "__main__":
