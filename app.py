@@ -15,6 +15,7 @@ DEFAULT_DB = BASE_DIR / "app.db"
 PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 ALLOWED_THEMES = {"default", "sunset", "midnight"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
+ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 
 DEV_LOG_ENTRIES = [
     {"pr": 1, "change": "Built the first monolith task tracker shell.", "result": "Shipped an initial login + task completion flow as a runnable baseline.", "why": "Establish a deployable product foundation before layering in infrastructure and roles."},
@@ -76,7 +77,8 @@ class TaskTrackerApp:
                 density TEXT NOT NULL DEFAULT 'comfortable',
                 created_by_user_id INTEGER,
                 last_login_at TEXT,
-                must_change_password INTEGER NOT NULL DEFAULT 1
+                must_change_password INTEGER NOT NULL DEFAULT 1,
+                is_active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE TABLE IF NOT EXISTS tasks (
@@ -149,6 +151,8 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
         if "must_change_password" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 1")
+        if "is_active" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
 
         db.executemany(
             """
@@ -275,22 +279,18 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/login")
             return self.handle_create_employer(start_response, session_user, self.parse_form(environ))
 
-        if path == "/employers/application" and method == "POST":
-            if not session_user:
-                return self.redirect(start_response, "/login")
-            if session_user["role"] != "employer":
-                return self.redirect(start_response, "/", flash=("error", "Only employer accounts can update applications."))
-            complete = self.parse_form(environ).get("status", "") == "complete"
-            self.mark_employer_application(session_user["id"], complete)
-            self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], f"status={'complete' if complete else 'incomplete'}")
-            return self.redirect(start_response, "/", flash=("success", "ICHRA setup status updated."))
-
         if path == "/employers/start-ichra" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
             if session_user["role"] != "employer":
                 return self.redirect(start_response, "/", flash=("error", "Only employer accounts can start ICHRA setup."))
+            employer_before = self.list_visible_employers(session_user)
+            was_started = bool(employer_before and employer_before[0]["ichra_started"])
             self.start_employer_ichra(session_user["id"])
+            if was_started:
+                self.complete_employer_application(session_user["id"])
+                self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], "status=complete")
+                return self.redirect(start_response, "/?view=applications", flash=("success", "Application marked complete."))
             self.log_action(session_user["id"], "ichra_started", "employer", session_user["id"], session_user["username"], "Employer started ICHRA setup")
             return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application started."))
 
@@ -371,6 +371,7 @@ class TaskTrackerApp:
         rows = db.execute(
             """
             SELECT u.id, u.username, u.display_name, u.role, u.created_by_user_id,
+                   u.is_active,
                    CASE WHEN tc.id IS NULL THEN 0 ELSE 1 END AS completed
             FROM users u
             LEFT JOIN task_completions tc
@@ -564,18 +565,31 @@ class TaskTrackerApp:
         admin = db.execute("SELECT id FROM users WHERE role = 'super_admin' ORDER BY id LIMIT 1").fetchone()
         return admin["id"] if admin else None
 
-    def mark_employer_application(self, employer_user_id: int, complete: bool):
+    def complete_employer_application(self, employer_user_id: int):
         db = self.db()
-        db.execute("UPDATE employers SET ichra_started = 1, application_complete = ? WHERE linked_user_id = ?", (1 if complete else 0, employer_user_id))
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = 1 WHERE linked_user_id = ?", (employer_user_id,))
         employer = db.execute("SELECT legal_name, primary_user_id FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
         db.commit()
         db.close()
-        if complete and employer and employer["primary_user_id"]:
+        if employer and employer["primary_user_id"]:
             self.create_notification(employer["primary_user_id"], f"ICHRA setup completed by {employer['legal_name']}.")
+
+    def set_employer_application_in_progress(self, employer_user_id: int):
+        db = self.db()
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = 0 WHERE linked_user_id = ?", (employer_user_id,))
+        db.commit()
+        db.close()
 
     def start_employer_ichra(self, employer_user_id: int):
         db = self.db()
-        db.execute("UPDATE employers SET ichra_started = 1 WHERE linked_user_id = ?", (employer_user_id,))
+        employer = db.execute("SELECT ichra_started FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
+        if not employer:
+            db.close()
+            return
+        if employer["ichra_started"]:
+            db.execute("UPDATE employers SET application_complete = 1 WHERE linked_user_id = ?", (employer_user_id,))
+        else:
+            db.execute("UPDATE employers SET ichra_started = 1 WHERE linked_user_id = ?", (employer_user_id,))
         db.commit()
         db.close()
 
@@ -622,7 +636,7 @@ class TaskTrackerApp:
         db.commit()
         db.close()
 
-    def admin_update_user(self, user_id: int, username: str, role: str, password: str):
+    def admin_update_user(self, user_id: int, username: str, role: str, password: str, is_active: int):
         db = self.db()
         user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not user:
@@ -630,8 +644,8 @@ class TaskTrackerApp:
             raise ValueError("User not found")
         password_hash = hash_password(password) if password else user["password_hash"]
         db.execute(
-            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ? WHERE id = ?",
-            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], user_id),
+            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ? WHERE id = ?",
+            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], is_active, user_id),
         )
         db.commit()
         db.close()
@@ -768,6 +782,8 @@ class TaskTrackerApp:
         password = form.get("password", "")
         if not user or user["password_hash"] != hash_password(password):
             return self.redirect(start_response, "/login", flash=("error", "Invalid username or password."))
+        if not user["is_active"]:
+            return self.redirect(start_response, "/login", flash=("error", "This account is deactivated. Contact your administrator."))
 
         db = self.db()
         db.execute("UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ?", (user["id"],))
@@ -811,9 +827,9 @@ class TaskTrackerApp:
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
-        allowed_roles = {"admin", "broker", "employer", "super_admin"} if session_user["role"] == "super_admin" else {"broker", "employer"}
-        if role not in allowed_roles:
-            role = "admin"
+        creator_level = ROLE_LEVELS.get(session_user["role"], -1)
+        if ROLE_LEVELS.get(role, -1) >= creator_level:
+            return self.redirect(start_response, "/", flash=("error", "You can only create users below your role level."))
         if len(username) < 3:
             return self.redirect(start_response, "/", flash=("error", "New users need a username (3+)."))
         try:
@@ -831,14 +847,16 @@ class TaskTrackerApp:
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
         password = form.get("password", "")
-        allowed_roles = {"admin", "broker", "employer", "super_admin"} if session_user["role"] == "super_admin" else {"broker", "employer"}
-        if role not in allowed_roles:
-            role = "admin"
+        is_active = 1 if form.get("is_active", "1") == "1" else 0
+        actor_level = ROLE_LEVELS.get(session_user["role"], -1)
+        target_level = ROLE_LEVELS.get(role, -1)
+        if target_level < 0 or target_level >= actor_level:
+            return self.redirect(start_response, "/", flash=("error", "You can only assign roles below your own."))
         if len(username) < 3:
             return self.redirect(start_response, "/", flash=("error", "Username must be at least 3 characters."))
 
         try:
-            self.admin_update_user(user_id, username, role, password)
+            self.admin_update_user(user_id, username, role, password, is_active)
             self.log_action(session_user["id"], "user_updated", "user", user_id, username, f"role={role}")
         except ValueError:
             return self.redirect(start_response, "/", flash=("error", "User no longer exists."))
@@ -860,7 +878,7 @@ class TaskTrackerApp:
             if not employer:
                 return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
             self.start_employer_ichra(employer["linked_user_id"])
-            self.mark_employer_application(employer["linked_user_id"], False)
+            self.set_employer_application_in_progress(employer["linked_user_id"])
             self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup application submitted")
             self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup application submitted.")
             return self.redirect(
@@ -1110,7 +1128,7 @@ class TaskTrackerApp:
         if role == "employer":
             nav_links.append(("applications", "Applications"))
         if show_application:
-            nav_links.insert(1, ("application", "ICHRA Setup Application"))
+            nav_links.insert(1, ("application", "Setup Applications"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         nav_links.append(("devlog", "Dev Log"))
@@ -1167,6 +1185,7 @@ class TaskTrackerApp:
                 <tr>
                   <td>{html.escape(row['username'])}</td>
                   <td>{html.escape(row['role'])}</td>
+                  <td>{'Active' if row['is_active'] else 'Deactivated'}</td>
                   <td>
                     <form method='post' action='/admin/users/update' class='inline-form'>
                       <input type='hidden' name='user_id' value='{row['id']}' />
@@ -1174,7 +1193,11 @@ class TaskTrackerApp:
                       <select name='role'>
                         <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
                         <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
-                        {"<option value='super_admin' {'selected' if row['role'] == 'super_admin' else ''}>super_admin</option>" if role == 'super_admin' else ""}
+                        <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
+                      </select>
+                      <select name='is_active'>
+                        <option value='1' {'selected' if row['is_active'] else ''}>active</option>
+                        <option value='0' {'selected' if not row['is_active'] else ''}>deactivated</option>
                       </select>
                       <input name='password' type='password' placeholder='new password (optional)' />
                       <button type='submit' class='secondary'>Save</button>
@@ -1184,9 +1207,7 @@ class TaskTrackerApp:
                 """
                 for row in users_for_admin
             )
-            create_role_options = "<option value='broker'>broker</option><option value='employer'>employer</option>"
-            if role == "super_admin":
-                create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option><option value='super_admin'>super_admin</option>"
+            create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option>"
             broker_admin_section = f"""
               <section class='section-block'>
                 <h3>{'Super Admin · Account Management' if role == 'super_admin' else ('Admin · Assigned Organizations' if role == 'admin' else 'Broker · Team Accounts')}</h3>
@@ -1196,7 +1217,7 @@ class TaskTrackerApp:
                   <button type='submit'>Create User</button>
                 </form>
                 <div class='table-wrap'><table class='user-table'>
-                  <thead><tr><th>Username</th><th>Role</th><th>Modify</th></tr></thead>
+                  <thead><tr><th>Username</th><th>Role</th><th>Status</th><th>Modify</th></tr></thead>
                   <tbody>{user_rows}</tbody>
                 </table></div>
               </section>
@@ -1291,23 +1312,12 @@ class TaskTrackerApp:
                 <section class='section-block'>
                   <h3>Applications</h3>
                   <div class='table-wrap'><table class='user-table'>
-                    <thead><tr><th>Application</th><th>Status</th><th>Current Action</th></tr></thead>
+                    <thead><tr><th>Application</th><th>Status</th><th>Open</th></tr></thead>
                     <tbody>
-                      <tr><td>Initial Employer Setup</td><td>Submitted</td><td>Review details in Dev Log and Notifications.</td></tr>
-                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td>{html.escape(employer_profile['onboarding_task'])}</td></tr>
+                      <tr><td>Initial Employer Setup</td><td>Submitted</td><td><a class='table-link' href='/?view=employers'>Open</a></td></tr>
+                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td><a class='table-link' href='/?view=applications'>Open</a></td></tr>
                     </tbody>
                   </table></div>
-                </section>
-                <section class='section-block'>
-                  <h3>Application Workflow</h3>
-                  <form method='post' action='/employers/application' class='inline-form'>
-                    <input type='hidden' name='status' value='incomplete' />
-                    <button type='submit' class='secondary'>Mark Application Incomplete</button>
-                  </form>
-                  <form method='post' action='/employers/application' class='inline-form'>
-                    <input type='hidden' name='status' value='complete' />
-                    <button type='submit'>Complete Application</button>
-                  </form>
                 </section>
             """
 
@@ -1322,7 +1332,7 @@ class TaskTrackerApp:
                     <a class='nav-link active' href='/?view=applications'>Finish ICHRA Setup Application</a>
                 """
             else:
-                header_primary_cta = "<span class='nav-link active'>ICHRA Setup Complete</span>"
+                header_primary_cta = "<span class='nav-link active'>Application Complete</span>"
 
         if role == "broker":
             header_primary_cta = "<a class='nav-link active' href='/?view=dashboard'>Refer a Client</a>"

@@ -123,7 +123,7 @@ class AppTests(unittest.TestCase):
             self.app,
             method="POST",
             path="/admin/users/update",
-            body=f"user_id={river['id']}&username=river2&role=super_admin&password=",
+            body=f"user_id={river['id']}&username=river2&role=admin&is_active=1&password=",
             cookie_header=cookie,
         )
         self.assertEqual(dict(update["headers"]).get("Location"), "/")
@@ -380,7 +380,7 @@ class AppTests(unittest.TestCase):
         notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=employer_cookie)
         self.assertIn("ready and waiting for you to finish", notifications["body"])
 
-    def test_employer_can_mark_application_complete(self):
+    def test_employer_can_complete_application_without_incomplete_toggle(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
         call_app(
@@ -405,8 +405,15 @@ class AppTests(unittest.TestCase):
         call_app(
             self.app,
             method="POST",
-            path="/employers/application",
-            body="status=complete",
+            path="/employers/start-ichra",
+            body="",
+            cookie_header=employer_cookie,
+        )
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/start-ichra",
+            body="",
             cookie_header=employer_cookie,
         )
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
@@ -479,6 +486,49 @@ class AppTests(unittest.TestCase):
         db.close()
         seen = call_app(self.app, method="POST", path="/notifications/seen", body=f"notification_id={note['id']}", cookie_header=cookie)
         self.assertEqual(dict(seen["headers"]).get("Location"), "/?view=notifications")
+
+
+    def test_admin_cannot_create_super_admin_accounts(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+
+        create = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=nosuper&password=user&role=super_admin",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(create["headers"]).get("Location"), "/")
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=nosuper&password=user")
+        self.assertNotEqual(dict(relogin["headers"]).get("Location"), "/")
+
+    def test_super_admin_can_deactivate_user_and_block_login(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=toggleme&password=user&role=admin",
+            cookie_header=cookie,
+        )
+
+        users = self.app.get_users_with_completion()
+        target = next(u for u in users if u["username"] == "toggleme")
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/update",
+            body=f"user_id={target['id']}&username=toggleme&role=admin&is_active=0&password=",
+            cookie_header=cookie,
+        )
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=toggleme&password=user")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/login")
 
     def test_super_admin_can_filter_logs_and_update_employer_settings(self):
         admin_cookie = ""

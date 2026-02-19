@@ -22,7 +22,7 @@ body {
 }
 
 .container {
-  width: min(960px, 94vw);
+  width: min(1240px, 96vw);
   margin: 2rem auto;
 }
 
@@ -78,7 +78,8 @@ button {
   padding: 0.7rem 1rem;
   font-weight: 700;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 button.secondary {
@@ -95,6 +96,7 @@ button.secondary {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .dashboard-nav {
@@ -111,6 +113,8 @@ button.secondary {
   border-radius: 999px;
   color: #33406e;
   font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .nav-link.active {
