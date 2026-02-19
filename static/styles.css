@@ -1,45 +1,69 @@
 :root {
-  --bg: #eef3ff;
+  --bg: #f2f5ff;
   --card: #ffffff;
-  --text: #132341;
-  --primary: #2563eb;
-  --secondary: #e2e8ff;
-  --success: #18794e;
-  --danger: #b42318;
+  --text: #1f2a44;
+  --primary: #4558ff;
+  --secondary: #dce3ff;
+  --success: #178a58;
+  --warning: #9f6d00;
+  --danger: #a52135;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  background: radial-gradient(circle at top right, #d7e4ff, var(--bg) 45%, #f6f9ff 90%);
+  background: linear-gradient(160deg, var(--bg), #e5ecff);
   color: var(--text);
+  min-height: 100vh;
 }
 
-.container { width: min(1080px, 95vw); margin: 1.25rem auto 2.5rem; display: grid; gap: 1rem; }
+.container {
+  width: min(960px, 94vw);
+  margin: 2rem auto;
+}
+
 .card {
   background: var(--card);
-  border: 1px solid #d9e3ff;
-  border-radius: 14px;
-  box-shadow: 0 12px 26px rgba(35, 57, 115, 0.08);
-  padding: 1.2rem;
+  border-radius: 16px;
+  box-shadow: 0 12px 28px rgba(25, 38, 70, 0.08);
+  padding: 1.5rem;
 }
 
-.auth-card { width: min(460px, 100%); margin-inline: auto; }
-.subtitle { color: #536384; margin: 0.35rem 0 0; }
+.auth-card {
+  width: min(460px, 100%);
+  margin-inline: auto;
+}
 
-.form-grid, .onboarding-grid { display: grid; gap: 0.9rem; margin-top: 1rem; }
-.onboarding-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-.onboarding-grid button { grid-column: 1 / -1; }
+.subtitle {
+  margin-top: -0.3rem;
+  color: #5d6787;
+}
 
-label { display: grid; gap: 0.35rem; font-weight: 600; font-size: 0.94rem; }
-input, select {
-  border: 1px solid #c8d7ff;
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+input,
+select {
+  border: 1px solid #cbd6ff;
   border-radius: 10px;
   padding: 0.65rem 0.75rem;
-  font-size: 0.97rem;
+  font-size: 1rem;
   background: #fff;
 }
+
 button {
   border: none;
   background: var(--primary);
@@ -49,24 +73,207 @@ button {
   font-weight: 700;
   cursor: pointer;
 }
-button.secondary { background: var(--secondary); color: var(--text); }
 
-.dashboard-header { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
-.user-table { width: 100%; border-collapse: collapse; margin-top: 0.8rem; }
-.user-table th, .user-table td { border-bottom: 1px solid #e2e8ff; padding: 0.65rem; text-align: left; font-size: 0.92rem; vertical-align: top; }
+button.secondary {
+  background: var(--secondary);
+  color: var(--text);
+}
 
-.flash-stack { display: grid; gap: 0.5rem; }
-.flash { border-radius: 10px; padding: 0.7rem 0.8rem; font-weight: 600; }
-.flash.success { background: #d8f3e3; color: var(--success); }
-.flash.error { background: #ffe5e8; color: var(--danger); }
+.hint ul {
+  margin: 0.4rem 0 0;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.task-card {
+  margin: 1.3rem 0;
+  background: #f8f9ff;
+  border: 1px solid #dde4ff;
+  border-radius: 14px;
+  padding: 1rem;
+}
+
+.status-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.status-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f9fbff;
+  border: 1px solid #e4e9ff;
+  border-radius: 10px;
+  padding: 0.7rem;
+}
+
+.pill {
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.complete {
+  background: #dff6ea;
+  color: var(--success);
+}
+
+.pending {
+  background: #fff1d8;
+  color: var(--warning);
+}
+
+.flash-stack {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.flash {
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  font-weight: 600;
+}
+
+.flash.success {
+  background: #def7e8;
+  color: var(--success);
+}
+
+.flash.error {
+  background: #ffe4e9;
+  color: var(--danger);
+}
 
 .eyebrow {
   display: inline-block;
-  margin: 0;
-  padding: 0.2rem 0.65rem;
+  margin: 0 0 0.4rem;
+  padding: 0.25rem 0.65rem;
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.82rem;
   font-weight: 700;
-  color: #2450c7;
-  background: #e3ebff;
+  color: #5a2f96;
+  background: #efe5ff;
+}
+
+.auth-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-card::before {
+  content: "";
+  position: absolute;
+  inset: -120px -120px auto auto;
+  width: 280px;
+  height: 280px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(105, 121, 255, 0.24), transparent 70%);
+  pointer-events: none;
+}
+
+button:hover {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+button {
+  transition: transform 0.16s ease, filter 0.16s ease;
+}
+
+.welcome-banner {
+  margin-bottom: 1rem;
+  border: 1px solid #f5d39f;
+  background: linear-gradient(135deg, #fff4de, #ffe9f8);
+  color: #7b3e00;
+  padding: 0.75rem 0.95rem;
+  border-radius: 12px;
+  font-weight: 700;
+}
+
+.status-list li {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.status-list li:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px rgba(41, 60, 115, 0.08);
+}
+
+.section-block {
+  margin-top: 1.4rem;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.9rem;
+}
+
+.user-table th,
+.user-table td {
+  border-bottom: 1px solid #e3e9ff;
+  padding: 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.dashboard.theme-sunset {
+  background: linear-gradient(180deg, #fff6ed, #fff);
+}
+
+.dashboard.theme-midnight {
+  background: linear-gradient(180deg, #1d2748, #10182f);
+  color: #eef2ff;
+}
+
+.dashboard.theme-midnight .subtitle,
+.dashboard.theme-midnight small {
+  color: #c5d1ff;
+}
+
+.dashboard.theme-midnight .task-card,
+.dashboard.theme-midnight .status-list li,
+.dashboard.theme-midnight input,
+.dashboard.theme-midnight select {
+  background: #1a2443;
+  border-color: #36487f;
+  color: #eef2ff;
+}
+
+.dashboard.density-compact {
+  font-size: 0.95rem;
+}
+
+.dashboard.density-compact .task-card,
+.dashboard.density-compact .status-list li,
+.dashboard.density-compact .card,
+.dashboard.density-compact input,
+.dashboard.density-compact select,
+.dashboard.density-compact button {
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
 }
