@@ -16,6 +16,39 @@ PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 ALLOWED_THEMES = {"default", "sunset", "midnight"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
 
+DEV_LOG_ENTRIES = [
+    {"pr": 1, "change": "Built the first monolith task tracker shell.", "result": "Shipped an initial login + task completion flow as a runnable baseline.", "why": "Establish a deployable product foundation before layering in infrastructure and roles."},
+    {"pr": 2, "change": "Added guidance for connecting the repository to Linode.", "result": "Deployment setup became documented and repeatable.", "why": "Reduce onboarding friction and avoid one-off deploy knowledge."},
+    {"pr": 3, "change": "Fixed missing requirements.txt path issues.", "result": "Build/install steps stopped failing during environment setup.", "why": "Unblock runtime provisioning and prevent startup errors."},
+    {"pr": 4, "change": "Repaired nginx service startup configuration.", "result": "Web service boot reliability improved.", "why": "Address infra-level blocker causing the app to stay unavailable."},
+    {"pr": 5, "change": "Fixed another 502 failure on the webpage.", "result": "Traffic routed correctly again.", "why": "Stabilize user access after proxy/runtime mismatch."},
+    {"pr": 6, "change": "Added additional 502 remediation for the monolith app.", "result": "Production routing became more resilient.", "why": "Harden service uptime across deploy attempts."},
+    {"pr": 7, "change": "Completed a final 502-focused fix pass.", "result": "Resolved recurring gateway errors in the live stack.", "why": "Close repeated incident pattern before feature expansion."},
+    {"pr": 8, "change": "Introduced manual trigger support for code push workflows.", "result": "Operators could run CI/CD on demand.", "why": "Improve release control for urgent fixes and validation."},
+    {"pr": 9, "change": "Extended/refined manual trigger behavior in the pipeline.", "result": "Workflow controls became easier to execute consistently.", "why": "Make deployment operations safer and more predictable."},
+    {"pr": 10, "change": "Created CI/CD workflow for Linode deployment.", "result": "Automated deploy path replaced manual-only steps.", "why": "Speed delivery and reduce drift between environments."},
+    {"pr": 11, "change": "Updated the login screen experience.", "result": "Authentication entry point became clearer for users.", "why": "Improve first-touch usability in the app."},
+    {"pr": 12, "change": "Added a GitHub Actions CI/CD pipeline.", "result": "Build and deployment checks became standardized in repo automation.", "why": "Increase confidence in merges and deployment repeatability."},
+    {"pr": 13, "change": "Debugged production login issues.", "result": "Authentication reliability improved in deployed environments.", "why": "Solve real-user login blockers before scaling usage."},
+    {"pr": 14, "change": "Fixed login flows and password management behavior.", "result": "Session/auth handling became more dependable.", "why": "Eliminate user lockout and inconsistent credential behavior."},
+    {"pr": 15, "change": "Changed seeded user passwords to password123.", "result": "Demo/test account expectations were aligned.", "why": "Provide a consistent default during stabilization."},
+    {"pr": 16, "change": "Resolved login loop caused by session key issues.", "result": "Successful login persisted correctly across redirects.", "why": "Fix a critical auth/session regression."},
+    {"pr": 17, "change": "Fixed multi-cookie parsing for session validation.", "result": "Session detection became accurate with richer cookie headers.", "why": "Handle real browser cookie behavior safely."},
+    {"pr": 18, "change": "Cleaned code and fixed task completion form parsing scope.", "result": "Task completion no longer stalled unexpectedly.", "why": "Address correctness and maintainability together."},
+    {"pr": 19, "change": "Added user settings and a super admin role with stronger dashboard styling.", "result": "System gained administrative user lifecycle controls.", "why": "Support role-based administration as product complexity increased."},
+    {"pr": 20, "change": "Introduced employer onboarding workflow with role-scoped visibility.", "result": "Employer account creation and scoped views were available.", "why": "Expand from internal task tracking to onboarding operations."},
+    {"pr": 21, "change": "Reverted PR #20.", "result": "Prior behavior was restored.", "why": "Rollback risk while iterating toward a safer onboarding implementation."},
+    {"pr": 22, "change": "Reintroduced employer onboarding while preserving existing dashboard features.", "result": "Onboarding returned without regressing prior functionality.", "why": "Deliver onboarding needs with lower disruption."},
+    {"pr": 23, "change": "Added navigation-driven dashboard and rebuilt a full ICHRA application form.", "result": "UI became tabbed and workflow-oriented.", "why": "Improve information architecture as feature surface grew."},
+    {"pr": 24, "change": "Added broker and employer role-specific experiences.", "result": "Role-tailored dashboards and permissions became first class.", "why": "Match product behavior to real participant responsibilities."},
+    {"pr": 25, "change": "Added employer settings editing, DB-backed login hints, and admin activity logs.", "result": "Operational visibility and account support tooling improved.", "why": "Increase admin traceability and self-service controls."},
+    {"pr": 26, "change": "Improved employer settings flow, log filter UX, and password policy.", "result": "Settings and audit workflows became easier and safer.", "why": "Polish day-to-day admin workflows after initial rollout."},
+    {"pr": 27, "change": "Split employer setup from ICHRA app and added notifications.", "result": "Workflow boundaries became clearer and users gained update visibility.", "why": "Reduce confusion and proactively surface important events."},
+    {"pr": 28, "change": "Adjusted setup toggle flow and redesigned employer settings dashboard.", "result": "Settings UI changed significantly.", "why": "Improve responsiveness and clarity in employer configuration."},
+    {"pr": 29, "change": "Reverted PR #28.", "result": "Dashboard/settings behavior returned to known-stable implementation.", "why": "Rollback after issues with the redesign/toggle behavior."},
+    {"pr": 30, "change": "Fixed employer app toggles and delivered an updated settings dashboard layout.", "result": "Redesign landed with corrected behavior.", "why": "Reapply UX improvements without the regressions that triggered the prior revert."},
+]
+
 
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode("utf-8")).hexdigest()
@@ -987,6 +1020,7 @@ class TaskTrackerApp:
         nav_links = [("dashboard", "Dashboard"), ("employers", "Employers"), ("notifications", f"Notifications {'⚠️' if unseen_count else ''}")]
         if show_application:
             nav_links.insert(1, ("application", "ICHRA Setup Application"))
+        nav_links.append(("devlog", "Dev Log"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
         if show_logs:
@@ -1186,6 +1220,21 @@ class TaskTrackerApp:
             </section>
         """
 
+        devlog_rows = "".join(
+            f"<tr><td>PR #{entry['pr']}</td><td>{html.escape(entry['change'])}</td><td>{html.escape(entry['result'])}</td><td>{html.escape(entry['why'])}</td></tr>"
+            for entry in sorted(DEV_LOG_ENTRIES, key=lambda item: item["pr"])
+        )
+        devlog_panel = f"""
+            <section class='section-block'>
+              <h3>Development Log</h3>
+              <p class='subtitle'>A running history of merged PRs, what changed, outcomes, and rationale. Add a new entry for each successful merge going forward.</p>
+              <div class='table-wrap'><table class='user-table'>
+                <thead><tr><th>PR</th><th>What Changed</th><th>Result</th><th>Why</th></tr></thead>
+                <tbody>{devlog_rows}</tbody>
+              </table></div>
+            </section>
+        """
+
         dashboard_panel = f"""
             {task_section}
             <section class='section-block'>
@@ -1201,6 +1250,7 @@ class TaskTrackerApp:
             "application": self.render_ichra_application_form() if show_application else "",
             "employers": employers_panel,
             "notifications": notifications_panel,
+            "devlog": devlog_panel,
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",
         }

@@ -51,6 +51,17 @@ class AppTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+
+    def test_dev_log_tab_is_visible_and_lists_pr_history(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=devlog")
+        self.assertIn("Dev Log", dashboard["body"])
+        self.assertIn("Development Log", dashboard["body"])
+        self.assertIn("PR #1", dashboard["body"])
+        self.assertIn("PR #30", dashboard["body"])
     def test_login_required_redirects_to_login(self):
         response = call_app(self.app, method="GET", path="/")
         self.assertTrue(response["status"].startswith("302"))
