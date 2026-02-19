@@ -255,6 +255,14 @@ button {
   align-items: center;
 }
 
+.employer-settings-form {
+  min-width: 280px;
+}
+
+.employer-settings-form textarea {
+  min-height: 70px;
+}
+
 .user-table {
   width: 100%;
   border-collapse: collapse;

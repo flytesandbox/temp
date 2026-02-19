@@ -344,6 +344,59 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertIn("Complete", dashboard["body"])
 
+    def test_login_page_shows_db_backed_accounts_for_roles(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokerx&password=brokerpw&role=broker",
+            cookie_header=admin_cookie,
+        )
+
+        login_page = call_app(self.app, method="GET", path="/login")
+        self.assertIn("Active demo accounts (DB-backed)", login_page["body"])
+        self.assertIn("admin", login_page["body"])
+        self.assertIn("brokerx", login_page["body"])
+        self.assertIn("alex", login_page["body"])
+
+    def test_super_admin_can_filter_logs_and_update_employer_settings(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=admin123")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Log+Target&contact_name=Taylor&work_email=taylor%40log.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Flog.com&state=CO"
+            ),
+            cookie_header=admin_cookie,
+        )
+
+        db = self.app.db()
+        employer = db.execute("SELECT id FROM employers WHERE legal_name = 'Log Target'").fetchone()
+        db.close()
+
+        update = call_app(
+            self.app,
+            method="POST",
+            path="/employers/update",
+            body=(
+                f"employer_id={employer['id']}&legal_name=Log+Target&contact_name=Taylor+Updated"
+                "&work_email=taylor%40log.com&phone=555-222&company_size=10-20&industry=Services"
+                "&website=https%3A%2F%2Flog.com&state=CO&onboarding_task=Collect+docs"
+            ),
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(update["headers"]).get("Location"), "/?view=employers")
+
+        logs_view = call_app(self.app, method="GET", path="/", query_string="view=logs&action=employer_updated", cookie_header=admin_cookie)
+        self.assertIn("Admin Activity Log", logs_view["body"])
+        self.assertIn("employer_updated", logs_view["body"])
+        self.assertIn("Log Target", logs_view["body"])
+
 
 if __name__ == "__main__":
     unittest.main()
