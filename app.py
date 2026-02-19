@@ -701,46 +701,62 @@ class TaskTrackerApp:
 
     def update_employer_settings(self, employer_id: int, form: dict[str, str]):
         db = self.db()
-        broker_user_id = int(form["broker_user_id"]) if form.get("broker_user_id") else None
-        primary_user_id = int(form["primary_user_id"]) if form.get("primary_user_id") else None
-        db.execute(
-            """
-            UPDATE employers
-            SET legal_name = ?, contact_name = ?, work_email = ?, phone = ?,
-                company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?,
-                broker_user_id = ?, primary_user_id = ?
-            WHERE id = ?
-            """,
-            (
-                form["legal_name"],
-                form["contact_name"],
-                form["work_email"],
-                form["phone"],
-                form["company_size"],
-                form["industry"],
-                form["website"],
-                form["state"],
-                form["onboarding_task"],
-                broker_user_id,
-                primary_user_id,
-                employer_id,
-            ),
-        )
-        employer_row = db.execute("SELECT linked_user_id FROM employers WHERE id = ?", (employer_id,)).fetchone()
-        if employer_row:
-            linked_user_id = employer_row["linked_user_id"]
-            current_user = db.execute("SELECT * FROM users WHERE id = ?", (linked_user_id,)).fetchone()
-            new_username = form["portal_username"].strip().lower()
-            new_password = form.get("portal_password", "")
-            password_hash = hash_password(new_password) if new_password else current_user["password_hash"]
-            password_hint = new_password or current_user["password_hint"]
-            must_change = 0 if new_password else current_user["must_change_password"]
+        try:
+            broker_user_id = int(form["broker_user_id"]) if form.get("broker_user_id") else None
+            primary_user_id = int(form["primary_user_id"]) if form.get("primary_user_id") else None
             db.execute(
-                "UPDATE users SET username = ?, display_name = ?, password_hash = ?, password_hint = ?, must_change_password = ? WHERE id = ?",
-                (new_username, form["contact_name"], password_hash, password_hint, must_change, linked_user_id),
+                """
+                UPDATE employers
+                SET legal_name = ?, contact_name = ?, work_email = ?, phone = ?,
+                    company_size = ?, industry = ?, website = ?, state = ?, onboarding_task = ?,
+                    broker_user_id = ?, primary_user_id = ?
+                WHERE id = ?
+                """,
+                (
+                    form["legal_name"],
+                    form["contact_name"],
+                    form["work_email"],
+                    form["phone"],
+                    form["company_size"],
+                    form["industry"],
+                    form["website"],
+                    form["state"],
+                    form["onboarding_task"],
+                    broker_user_id,
+                    primary_user_id,
+                    employer_id,
+                ),
             )
-        db.commit()
-        db.close()
+            employer_row = db.execute("SELECT linked_user_id FROM employers WHERE id = ?", (employer_id,)).fetchone()
+            if employer_row:
+                linked_user_id = employer_row["linked_user_id"]
+                current_user = db.execute("SELECT * FROM users WHERE id = ?", (linked_user_id,)).fetchone()
+                new_username = form["portal_username"].strip().lower()
+
+                duplicate_username = db.execute(
+                    "SELECT id FROM users WHERE username = ? AND id != ?",
+                    (new_username, linked_user_id),
+                ).fetchone()
+                if duplicate_username:
+                    raise ValueError("Employer username is already in use.")
+
+                new_password = form.get("portal_password", "")
+                password_hash = hash_password(new_password) if new_password else current_user["password_hash"]
+                password_hint = new_password or current_user["password_hint"]
+                must_change = 0 if new_password else current_user["must_change_password"]
+                db.execute(
+                    "UPDATE users SET username = ?, display_name = ?, password_hash = ?, password_hint = ?, must_change_password = ? WHERE id = ?",
+                    (new_username, form["contact_name"], password_hash, password_hint, must_change, linked_user_id),
+                )
+            db.commit()
+        except sqlite3.IntegrityError as exc:
+            db.rollback()
+            raise ValueError("Employer username is already in use.") from exc
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     def get_visible_employer_by_id(self, session_user, employer_id: int):
         rows = self.list_visible_employers(session_user)
@@ -952,7 +968,10 @@ class TaskTrackerApp:
         clean["broker_user_id"] = form.get("broker_user_id", "").strip()
         clean["primary_user_id"] = form.get("primary_user_id", "").strip()
 
-        self.update_employer_settings(employer_id, clean)
+        try:
+            self.update_employer_settings(employer_id, clean)
+        except ValueError as exc:
+            return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("error", str(exc)))
         self.log_action(session_user["id"], "employer_updated", "employer", employer_id, clean["legal_name"], "Employer settings updated")
         return self.redirect(start_response, f"/employers/settings?id={employer_id}", flash=("success", "Employer settings updated."))
 
