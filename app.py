@@ -68,8 +68,10 @@ class TaskTrackerApp:
                 website TEXT NOT NULL,
                 state TEXT NOT NULL,
                 onboarding_task TEXT NOT NULL,
+                application_complete INTEGER NOT NULL DEFAULT 0,
                 linked_user_id INTEGER NOT NULL UNIQUE,
                 created_by_user_id INTEGER NOT NULL,
+                broker_user_id INTEGER,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
             """
@@ -109,6 +111,12 @@ class TaskTrackerApp:
             ],
         )
         db.execute("UPDATE users SET role = 'super_admin', created_by_user_id = NULL WHERE username = 'admin'")
+
+        employer_columns = {row[1] for row in db.execute("PRAGMA table_info(employers)").fetchall()}
+        if "application_complete" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN application_complete INTEGER NOT NULL DEFAULT 0")
+        if "broker_user_id" not in employer_columns:
+            db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -167,21 +175,30 @@ class TaskTrackerApp:
         if path == "/admin/users/create" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            if session_user["role"] != "super_admin":
-                return self.redirect(start_response, "/", flash=("error", "Only the super admin can create users."))
-            return self.handle_admin_create_user(start_response, self.parse_form(environ))
+            if session_user["role"] not in {"super_admin", "broker"}:
+                return self.redirect(start_response, "/", flash=("error", "Only admins and brokers can create users."))
+            return self.handle_admin_create_user(start_response, session_user, self.parse_form(environ))
 
         if path == "/admin/users/update" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            if session_user["role"] != "super_admin":
-                return self.redirect(start_response, "/", flash=("error", "Only the super admin can modify users."))
-            return self.handle_admin_update_user(start_response, self.parse_form(environ))
+            if session_user["role"] not in {"super_admin", "broker"}:
+                return self.redirect(start_response, "/", flash=("error", "Only admins and brokers can modify users."))
+            return self.handle_admin_update_user(start_response, session_user, self.parse_form(environ))
 
         if path == "/employers/create" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
             return self.handle_create_employer(start_response, session_user, self.parse_form(environ))
+
+        if path == "/employers/application" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "employer":
+                return self.redirect(start_response, "/", flash=("error", "Only employer accounts can update applications."))
+            complete = self.parse_form(environ).get("status", "") == "complete"
+            self.mark_employer_application(session_user["id"], complete)
+            return self.redirect(start_response, "/", flash=("success", "Application status updated."))
 
         start_response("404 Not Found", [("Content-Type", "text/plain")])
         return [b"Not found"]
@@ -243,19 +260,81 @@ class TaskTrackerApp:
 
     def list_visible_employers(self, session_user):
         db = self.db()
-        creator_id = session_user["id"] if session_user["role"] != "employer" else session_user["created_by_user_id"]
-        rows = db.execute(
-            """
-            SELECT e.*, u.username AS portal_username
-            FROM employers e
-            JOIN users u ON u.id = e.linked_user_id
-            WHERE e.created_by_user_id = ?
-            ORDER BY e.created_at DESC
-            """,
-            (creator_id,),
-        ).fetchall()
+        if session_user["role"] == "super_admin":
+            rows = db.execute(
+                """
+                SELECT e.*, u.username AS portal_username,
+                       broker.username AS broker_username
+                FROM employers e
+                JOIN users u ON u.id = e.linked_user_id
+                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                ORDER BY e.created_at DESC
+                """
+            ).fetchall()
+        elif session_user["role"] == "broker":
+            rows = db.execute(
+                """
+                SELECT e.*, u.username AS portal_username,
+                       broker.username AS broker_username
+                FROM employers e
+                JOIN users u ON u.id = e.linked_user_id
+                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                WHERE e.broker_user_id = ?
+                ORDER BY e.created_at DESC
+                """,
+                (session_user["id"],),
+            ).fetchall()
+        elif session_user["role"] == "employer":
+            rows = db.execute(
+                """
+                SELECT e.*, u.username AS portal_username,
+                       broker.username AS broker_username
+                FROM employers e
+                JOIN users u ON u.id = e.linked_user_id
+                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                WHERE e.linked_user_id = ?
+                ORDER BY e.created_at DESC
+                """,
+                (session_user["id"],),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT e.*, u.username AS portal_username,
+                       broker.username AS broker_username
+                FROM employers e
+                JOIN users u ON u.id = e.linked_user_id
+                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                WHERE e.created_by_user_id = ?
+                ORDER BY e.created_at DESC
+                """,
+                (session_user["id"],),
+            ).fetchall()
         db.close()
         return rows
+
+    def get_manageable_brokers(self, session_user):
+        db = self.db()
+        if session_user["role"] == "super_admin":
+            rows = db.execute("SELECT id, username, display_name FROM users WHERE role = 'broker' ORDER BY username").fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT id, username, display_name
+                FROM users
+                WHERE role = 'broker' AND (id = ? OR created_by_user_id = ?)
+                ORDER BY username
+                """,
+                (session_user["id"], session_user["id"]),
+            ).fetchall()
+        db.close()
+        return rows
+
+    def mark_employer_application(self, employer_user_id: int, complete: bool):
+        db = self.db()
+        db.execute("UPDATE employers SET application_complete = ? WHERE linked_user_id = ?", (1 if complete else 0, employer_user_id))
+        db.commit()
+        db.close()
 
     def complete_for_user(self, user_id: int, task_id: int):
         db = self.db()
@@ -280,11 +359,11 @@ class TaskTrackerApp:
         db.commit()
         db.close()
 
-    def create_user(self, username: str, password: str, role: str):
+    def create_user(self, username: str, password: str, role: str, created_by_user_id: int | None = None):
         db = self.db()
         db.execute(
-            "INSERT INTO users (username, display_name, password_hash, role, created_by_user_id) VALUES (?, ?, ?, ?, NULL)",
-            (username, username.capitalize(), hash_password(password), role),
+            "INSERT INTO users (username, display_name, password_hash, role, created_by_user_id) VALUES (?, ?, ?, ?, ?)",
+            (username, username.capitalize(), hash_password(password), role, created_by_user_id),
         )
         db.commit()
         db.close()
@@ -308,7 +387,7 @@ class TaskTrackerApp:
         count = db.execute("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?", (f"{seed}%",)).fetchone()["n"]
         return f"{seed}{count + 1}"
 
-    def create_employer(self, creator_user_id: int, form: dict[str, str]) -> str:
+    def create_employer(self, creator_user_id: int, form: dict[str, str], broker_user_id: int | None = None) -> str:
         db = self.db()
         username = self.build_employer_username(db, form["legal_name"])
         display_name = form["contact_name"].strip() or form["legal_name"].strip()
@@ -325,8 +404,8 @@ class TaskTrackerApp:
             """
             INSERT INTO employers (
                 legal_name, contact_name, work_email, phone, company_size,
-                industry, website, state, onboarding_task, linked_user_id, created_by_user_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 form["legal_name"].strip(),
@@ -338,8 +417,10 @@ class TaskTrackerApp:
                 form["website"].strip(),
                 form["state"].strip(),
                 "Complete benefits roster import and confirm renewal month.",
+                0,
                 linked_user_id,
                 creator_user_id,
+                broker_user_id,
             ),
         )
         db.commit()
@@ -411,21 +492,22 @@ class TaskTrackerApp:
         self.update_user_style(session_user["id"], theme, density)
         return self.redirect(start_response, "/", flash=("success", "Dashboard style saved."))
 
-    def handle_admin_create_user(self, start_response, form):
+    def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         password = form.get("password", "")
         role = form.get("role", "user")
-        if role not in {"user", "super_admin"}:
+        allowed_roles = {"user", "broker", "employer", "super_admin"} if session_user["role"] == "super_admin" else {"user", "employer"}
+        if role not in allowed_roles:
             role = "user"
         if len(username) < 3 or len(password) < 6:
             return self.redirect(start_response, "/", flash=("error", "New users need a username (3+) and password (6+)."))
         try:
-            self.create_user(username, password, role)
+            self.create_user(username, password, role, created_by_user_id=session_user["id"])
         except sqlite3.IntegrityError:
             return self.redirect(start_response, "/", flash=("error", "Unable to create user. Username may already exist."))
         return self.redirect(start_response, "/", flash=("success", "User created."))
 
-    def handle_admin_update_user(self, start_response, form):
+    def handle_admin_update_user(self, start_response, session_user, form):
         try:
             user_id = int(form.get("user_id", ""))
         except ValueError:
@@ -433,7 +515,8 @@ class TaskTrackerApp:
         username = form.get("username", "").strip().lower()
         role = form.get("role", "user")
         password = form.get("password", "")
-        if role not in {"user", "super_admin"}:
+        allowed_roles = {"user", "broker", "employer", "super_admin"} if session_user["role"] == "super_admin" else {"user", "employer"}
+        if role not in allowed_roles:
             role = "user"
         if len(username) < 3:
             return self.redirect(start_response, "/", flash=("error", "Username must be at least 3 characters."))
@@ -465,7 +548,8 @@ class TaskTrackerApp:
         if any(not form.get(name, "").strip() for name in required):
             return self.redirect(start_response, "/?view=application", flash=("error", "Please complete all required application fields."))
 
-        username = self.create_employer(session_user["id"], form)
+        broker_user_id = session_user["id"] if session_user["role"] == "broker" else None
+        username = self.create_employer(session_user["id"], form, broker_user_id=broker_user_id)
         return self.redirect(
             start_response,
             "/?view=employers",
@@ -552,16 +636,77 @@ class TaskTrackerApp:
               <td>{html.escape(row['contact_name'])}</td>
               <td>{html.escape(row['work_email'])}</td>
               <td>{html.escape(row['portal_username'])}</td>
+              <td>{html.escape(row['broker_username'] or 'Unassigned')}</td>
+              <td>{'Complete' if row['application_complete'] else 'In progress'}</td>
               <td>{html.escape(row['onboarding_task'])}</td>
             </tr>
             """
             for row in employers
         )
         if not employer_rows:
-            employer_rows = "<tr><td colspan='5'>No employers onboarded yet.</td></tr>"
+            employer_rows = "<tr><td colspan='7'>No employers available for this account yet.</td></tr>"
 
-        admin_section = ""
-        if user["role"] == "super_admin":
+        role = user["role"]
+        role_title = {
+            "super_admin": "Admin Operations Dashboard",
+            "broker": "Broker Portfolio Dashboard",
+            "employer": "Employer Workspace",
+            "user": "Team Contributor Dashboard",
+        }.get(role, "Dashboard")
+
+        role_banner = {
+            "super_admin": "Manage broker accounts and system-wide visibility.",
+            "broker": "Create employers and monitor all applications assigned to your book.",
+            "employer": "Review your application and complete outstanding onboarding tasks.",
+            "user": "Track deployment progress and support employer setup requests.",
+        }.get(role, "")
+
+        show_application = role in {"super_admin", "broker", "user"}
+        show_settings = role in {"super_admin", "broker", "user"}
+
+        nav_links = [("dashboard", "Dashboard"), ("employers", "Employers")]
+        if show_application:
+            nav_links.insert(1, ("application", "New Employer Setup"))
+        if show_settings:
+            nav_links.append(("settings", "Settings"))
+
+        nav_html = "".join(
+            f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
+            for key, label in nav_links
+        )
+
+        task_section = ""
+        if role in {"super_admin", "broker", "user"}:
+            task_section = """
+              <article class='task-card'>
+                <h2>Deployment Readiness Task</h2>
+                <p>Confirm the app works in Codespaces and on Linode.</p>
+                <form method='post' action='/task/complete'><button type='submit'>Mark My Task Complete</button></form>
+              </article>
+            """
+
+        employer_workspace = ""
+        if role == "employer":
+            employer_workspace = """
+              <section class='section-block'>
+                <h3>Application Workflow</h3>
+                <p class='subtitle'>Use these actions to keep your employer application up to date.</p>
+                <form method='post' action='/employers/application' class='inline-form'>
+                  <input type='hidden' name='status' value='incomplete' />
+                  <button type='submit' class='secondary'>Mark Application Incomplete</button>
+                </form>
+                <form method='post' action='/employers/application' class='inline-form'>
+                  <input type='hidden' name='status' value='complete' />
+                  <button type='submit'>Complete Application</button>
+                </form>
+              </section>
+            """
+
+        broker_admin_section = ""
+        if role in {"super_admin", "broker"}:
+            users_for_admin = [row for row in rows if row["role"] != "employer"]
+            if role == "broker":
+                users_for_admin = [row for row in users_for_admin if row["role"] == "user"]
             user_rows = "".join(
                 f"""
                 <tr>
@@ -573,6 +718,7 @@ class TaskTrackerApp:
                       <input name='username' value='{html.escape(row['username'])}' required minlength='3' />
                       <select name='role'>
                         <option value='user' {'selected' if row['role'] == 'user' else ''}>user</option>
+                        <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
                         <option value='super_admin' {'selected' if row['role'] == 'super_admin' else ''}>super_admin</option>
                       </select>
                       <input name='password' type='password' placeholder='new password (optional)' />
@@ -581,18 +727,18 @@ class TaskTrackerApp:
                   </td>
                 </tr>
                 """
-                for row in rows
+                for row in users_for_admin
             )
-            admin_section = f"""
+            create_role_options = "<option value='user'>user</option><option value='employer'>employer</option>"
+            if role == "super_admin":
+                create_role_options = create_role_options + "<option value='broker'>broker</option><option value='super_admin'>super_admin</option>"
+            broker_admin_section = f"""
               <section class='section-block'>
-                <h3>Super Admin · User Management</h3>
+                <h3>{'Admin · Account Management' if role == 'super_admin' else 'Broker · Team Accounts'}</h3>
                 <form method='post' action='/admin/users/create' class='inline-form'>
                   <input name='username' placeholder='new username' required minlength='3' />
                   <input name='password' type='password' placeholder='new password' required minlength='6' />
-                  <select name='role'>
-                    <option value='user'>user</option>
-                    <option value='super_admin'>super_admin</option>
-                  </select>
+                  <select name='role'>{create_role_options}</select>
                   <button type='submit'>Create User</button>
                 </form>
                 <table class='user-table'>
@@ -602,17 +748,8 @@ class TaskTrackerApp:
               </section>
             """
 
-        employer_form_section = ""
-        settings_section = ""
-        task_section = ""
-        if user["role"] != "employer":
-            task_section = """
-              <article class='task-card'>
-                <h2>Deployment Readiness Task</h2>
-                <p>Confirm the app works in Codespaces and on Linode.</p>
-                <form method='post' action='/task/complete'><button type='submit'>Mark My Task Complete</button></form>
-              </article>
-            """
+        settings_section = "<section class='section-block'><p class='subtitle'>This account has no editable settings.</p></section>"
+        if show_settings:
             settings_section = f"""
               <section class='section-block settings-grid'>
                 <div>
@@ -648,25 +785,16 @@ class TaskTrackerApp:
                 </div>
               </section>
             """
-            employer_form_section = self.render_ichra_application_form()
 
-        employer_note = (
-            "Employer accounts are read-only and can only see employers created by your manager."
-            if user["role"] == "employer"
-            else "All non-employer users can create new Employers from this form."
-        )
-
-        nav_links = [
-            ("dashboard", "Dashboard"),
-            ("application", "New Employer Application"),
-            ("employers", "Employers"),
-            ("settings", "Settings"),
-        ]
-        nav_html = "".join(
-            f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
-            for key, label in nav_links
-            if not (user["role"] == "employer" and key in {"application", "settings"})
-        )
+        employers_panel = f"""
+            <section class='section-block'>
+              <h3>{'My Employer Application' if role == 'employer' else 'Employer Accounts'}</h3>
+              <table class='user-table'>
+                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Application</th><th>Assigned Task</th></tr></thead>
+                <tbody>{employer_rows}</tbody>
+              </table>
+            </section>
+        """
 
         dashboard_panel = f"""
             {task_section}
@@ -674,34 +802,25 @@ class TaskTrackerApp:
               <h3>Team Completion Status</h3>
               <ul class='status-list'>{status_rows}</ul>
             </section>
-            {admin_section}
+            {employer_workspace}
+            {broker_admin_section}
         """
-        settings_panel = settings_section or "<section class='section-block'><p class='subtitle'>Employer accounts are read-only.</p></section>"
-        employers_panel = f"""
-            <section class='section-block'>
-              <h3>Employers</h3>
-              <p class='subtitle'>{html.escape(employer_note)}</p>
-              <table class='user-table'>
-                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Assigned Task</th></tr></thead>
-                <tbody>{employer_rows}</tbody>
-              </table>
-            </section>
-        """
+
         panel_lookup = {
             "dashboard": dashboard_panel,
-            "application": employer_form_section if user["role"] != "employer" else "",
+            "application": self.render_ichra_application_form() if show_application else "",
             "employers": employers_panel,
-            "settings": settings_panel,
+            "settings": settings_section,
         }
         active_panel = panel_lookup.get(active_view, dashboard_panel)
 
         html_body = self.flash_html(flash_message) + f"""
-            <section class='card dashboard theme-{user['theme']} density-{user['density']}'>
-              <div class='welcome-banner'>🎉 Great to see you! Let's make today productive.</div>
+            <section class='card dashboard role-{role} theme-{user['theme']} density-{user['density']}'>
+              <div class='welcome-banner'>{html.escape(role_banner)}</div>
               <header class='dashboard-header'>
                 <div>
-                  <h1>Welcome, {html.escape(user['display_name'])}</h1>
-                  <p class='subtitle'>Track shared progress for deployment validation.</p>
+                  <h1>{html.escape(role_title)}</h1>
+                  <p class='subtitle'>Welcome, {html.escape(user['display_name'])}</p>
                 </div>
                 <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
               </header>
