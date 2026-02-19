@@ -300,12 +300,15 @@ button {
 .user-table td .nav-link {
   width: 100%;
   text-align: center;
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
 }
 
 .user-table td .settings-link {
   width: auto;
   text-align: left;
   display: inline;
+=======
+>>>>>>> main
 }
 
 .dashboard.theme-sunset {
@@ -414,6 +417,7 @@ button {
   font-weight: 500;
 }
 
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
 .welcome-cta {
   background: linear-gradient(135deg, #f5f8ff, #fff4f8);
   border: 1px solid #d8e2ff;
@@ -449,6 +453,8 @@ button {
   gap: 0.55rem;
 }
 
+=======
+>>>>>>> main
 @media (max-width: 390px) {
   .container {
     width: min(100%, 96vw);

@@ -360,7 +360,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("admin", login_page["body"])
         self.assertIn("brokerx", login_page["body"])
         self.assertIn("alex", login_page["body"])
-        self.assertIn("New Employer Setup", login_page["body"])
+        self.assertIn("Prospective Employer Sign Up", login_page["body"])
 
     def test_public_signup_creates_employer_request(self):
         response = call_app(

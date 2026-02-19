@@ -76,10 +76,13 @@ class TaskTrackerApp:
                 created_by_user_id INTEGER NOT NULL,
                 broker_user_id INTEGER,
                 primary_user_id INTEGER,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
                 ichra_start_date TEXT,
                 service_type TEXT,
                 claim_option TEXT,
                 agent_support TEXT,
+=======
+>>>>>>> main
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -164,6 +167,7 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
         if "primary_user_id" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN primary_user_id INTEGER")
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
         if "ichra_start_date" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN ichra_start_date TEXT")
         if "service_type" not in employer_columns:
@@ -172,6 +176,8 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE employers ADD COLUMN claim_option TEXT")
         if "agent_support" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN agent_support TEXT")
+=======
+>>>>>>> main
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -476,6 +482,7 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
     def get_assignable_primary_users(self, session_user):
         db = self.db()
         if session_user["role"] == "super_admin":
@@ -495,6 +502,8 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+=======
+>>>>>>> main
     def list_notifications(self, user_id: int):
         db = self.db()
         rows = db.execute(
@@ -606,9 +615,14 @@ class TaskTrackerApp:
             """
             INSERT INTO employers (
                 legal_name, contact_name, work_email, phone, company_size,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
                 industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id,
                 ichra_start_date, service_type, claim_option, agent_support
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+=======
+                industry, website, state, onboarding_task, application_complete, linked_user_id, created_by_user_id, broker_user_id, primary_user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+>>>>>>> main
             """,
             (
                 form["legal_name"].strip(),
@@ -625,10 +639,13 @@ class TaskTrackerApp:
                 creator_user_id,
                 broker_user_id,
                 primary_user_id,
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
                 form.get("ichra_start_date", "").strip(),
                 form.get("service_type", "").strip(),
                 form.get("claim_option", "").strip(),
                 form.get("agent_support", "").strip(),
+=======
+>>>>>>> main
             ),
         )
         db.commit()
@@ -799,7 +816,11 @@ class TaskTrackerApp:
     def handle_create_employer(self, start_response, session_user, form):
         if session_user["role"] == "employer":
             return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
         mode = form.get("setup_mode", "basic")
+=======
+        mode = form.get("setup_mode", "ichra")
+>>>>>>> main
 
         if not form.get("contact_name", "").strip():
             primary_first = form.get("primary_first_name", "").strip()
@@ -980,6 +1001,7 @@ class TaskTrackerApp:
                 <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
               </div>
               <hr />
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
               <div class="welcome-cta">
                 <h2>New Employer Setup</h2>
                 <p class="subtitle">New here? Start with a short setup request and we’ll help you get enrolled.</p>
@@ -999,6 +1021,17 @@ class TaskTrackerApp:
                   <button type="submit">Submit Employer Request</button>
                 </form>
               </dialog>
+=======
+              <h2>Prospective Employer Sign Up</h2>
+              <p class="subtitle">Public form for employers needing a basic employer setup request.</p>
+              <form method="post" action="/signup" class="form-grid">
+                <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
+                <label>Contact Name <input type="text" name="prospect_name" required /></label>
+                <label>Work Email <input type="email" name="prospect_email" required /></label>
+                <label>Phone <input type="text" name="prospect_phone" /></label>
+                <button type="submit" class="secondary">Submit Employer Request</button>
+              </form>
+>>>>>>> main
             </section>
             """
         html_doc = self.html_page("Monolith Task Tracker", html_body)
@@ -1317,10 +1350,13 @@ class TaskTrackerApp:
                 <option value='basic'>Basic Employer Setup</option>
               </select>
             </label>
+<<<<<<< codex/fix-button-responsiveness-in-tables-wcdrdh
             <details class='field-log'>
               <summary>Need only a basic employer profile?</summary>
               <p>Choose <strong>Basic Employer Setup</strong> and complete only company information fields before submitting.</p>
             </details>
+=======
+>>>>>>> main
             <h4>Desired ICHRA Start Date *</h4><input type='date' name='ichra_start_date' required />
             <div class='ichra-only'>
               <h4>Which service are you signing up for? *</h4>
