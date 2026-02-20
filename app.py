@@ -400,7 +400,7 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/", flash=("error", "Only employer accounts can start ICHRA setup."))
             self.start_employer_ichra(session_user["id"])
             self.log_action(session_user["id"], "ichra_started", "employer", session_user["id"], session_user["username"], "Employer started ICHRA setup")
-            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application opened. Complete and submit the artifact when ready."))
+            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application opened. Complete and submit the application when ready."))
 
         if path == "/applications/ichra/save" and method == "POST":
             if not session_user:
@@ -1294,12 +1294,12 @@ class TaskTrackerApp:
                 "claim_option": form.get("claim_option", "").strip(),
                 "agent_support": form.get("agent_support", "").strip(),
             }, actor_user_id=session_user["id"], submit=False)
-            self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup artifact initialized")
-            self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup artifact initialized.")
+            self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup application initialized")
+            self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup application initialized.")
             return self.redirect(
                 start_response,
                 f"/?view=application&employer_id={existing_employer_id}",
-                flash=("success", f"ICHRA setup artifact started for {employer['legal_name']}. Continue editing before submission.")
+                flash=("success", f"ICHRA setup application started for {employer['legal_name']}. Continue editing before submission.")
             )
 
         if not form.get("contact_name", "").strip():
@@ -1331,14 +1331,14 @@ class TaskTrackerApp:
         try:
             employer_id = int(form.get("employer_id", ""))
         except ValueError:
-            return self.redirect(start_response, "/?view=application", flash=("error", "Select an employer before saving the ICHRA artifact."))
+            return self.redirect(start_response, "/?view=application", flash=("error", "Select an employer before saving the ICHRA application."))
 
         employer = self.get_visible_employer_by_id(session_user, employer_id)
         if not employer:
             return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
 
         if session_user["role"] == "employer" and employer["linked_user_id"] != session_user["id"]:
-            return self.redirect(start_response, "/?view=application", flash=("error", "You can only edit your own employer artifact."))
+            return self.redirect(start_response, "/?view=application", flash=("error", "You can only edit your own employer application."))
 
         required_fields = [
             "desired_start_date", "service_type", "primary_first_name", "primary_last_name", "primary_email",
@@ -1350,17 +1350,17 @@ class TaskTrackerApp:
         submit = action == "submit"
 
         if submit and any(not payload[field] for field in required_fields):
-            return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=("error", "Complete all required ICHRA artifact fields before submitting."))
+            return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=("error", "Complete all required ICHRA application fields before submitting."))
 
         self.upsert_ichra_application(employer_id, payload, actor_user_id=session_user["id"], submit=submit)
         if submit:
-            self.log_action(session_user["id"], "application_status_changed", "employer", employer_id, employer["legal_name"], "status=complete;artifact=ichra")
+            self.log_action(session_user["id"], "application_status_changed", "employer", employer_id, employer["legal_name"], "status=complete;application=ichra")
             if employer["primary_user_id"]:
-                self.create_notification(employer["primary_user_id"], f"ICHRA setup artifact submitted for {employer['legal_name']}.")
-            self.create_notification(session_user["id"], f"ICHRA setup artifact submitted for {employer['legal_name']}.")
-            flash = ("success", f"ICHRA setup artifact submitted for {employer['legal_name']}.")
+                self.create_notification(employer["primary_user_id"], f"ICHRA setup application submitted for {employer['legal_name']}.")
+            self.create_notification(session_user["id"], f"ICHRA setup application submitted for {employer['legal_name']}.")
+            flash = ("success", f"ICHRA setup application submitted for {employer['legal_name']}.")
         else:
-            self.log_action(session_user["id"], "employer_updated", "employer", employer_id, employer["legal_name"], "Saved ICHRA setup artifact draft")
+            self.log_action(session_user["id"], "employer_updated", "employer", employer_id, employer["legal_name"], "Saved ICHRA setup application draft")
             flash = ("success", f"Draft saved for {employer['legal_name']}.")
 
         target_view = "applications" if session_user["role"] == "employer" else "application"
@@ -1923,34 +1923,25 @@ class TaskTrackerApp:
                 <section class='section-block'>
                   <h3>Applications</h3>
                   <div class='table-wrap'><table class='user-table'>
-                    <thead><tr><th>Application</th><th>Status</th><th>Open</th></tr></thead>
+                    <thead><tr><th>Application</th><th>Status</th><th>Open</th><th>Authority</th></tr></thead>
                     <tbody>
-                      <tr><td>Initial Employer Setup</td><td>Submitted</td><td><a class='table-link' href='/?view=employers'>Open</a></td></tr>
-                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td><button type='button' class='table-link as-button' data-modal-open='ichra-application-modal'>Open Artifact</button></td></tr>
+                      <tr><td>Initial Employer Setup</td><td>Submitted</td><td><a class='table-link' href='/?view=employers'>Open</a></td><td><span class='badge'>/db/employers</span></td></tr>
+                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td>{"<a class='table-link' href='/?view=application&employer_id=" + str(employer_profile['id']) + "'>Open Application</a>" if employer_profile['ichra_started'] else "<a class='table-link' href='/?view=application&employer_id=" + str(employer_profile['id']) + "'>Start Application</a>"}</td><td><span class='badge'>/db/ichra_applications</span></td></tr>
                     </tbody>
                   </table></div>
                 </section>
             """
-            employer_application_modal = f"""
-                <div class='modal' id='ichra-application-modal' aria-hidden='true'>
-                  <div class='modal-backdrop' data-modal-close='ichra-application-modal'></div>
-                  <section class='modal-card card artifact-modal'>
-                    <button type='button' class='modal-close' aria-label='Close' data-modal-close='ichra-application-modal'>×</button>
-                    {self.render_ichra_application_form(user, selected_employer_id=employer_profile['id'])}
-                  </section>
-                </div>
-            """
 
             if not employer_profile["ichra_started"]:
                 header_primary_cta = """
-                    <button type='button' data-modal-open='ichra-application-modal'>Start ICHRA Artifact</button>
+                    <a class='nav-link active' href='/?view=applications'>Start ICHRA Application</a>
                 """
             elif not employer_profile["application_complete"]:
                 header_primary_cta = """
-                    <button type='button' class='nav-link active as-button' data-modal-open='ichra-application-modal'>Continue ICHRA Artifact</button>
+                    <a class='nav-link active' href='/?view=applications'>Continue ICHRA Application</a>
                 """
             else:
-                header_primary_cta = "<span class='nav-link active'>Artifact Submitted</span>"
+                header_primary_cta = "<span class='nav-link active'>Application Submitted</span>"
         if role == "broker":
             header_primary_cta = "<a class='nav-link active' href='/?view=dashboard'>Refer a Client</a>"
 
@@ -2080,7 +2071,7 @@ class TaskTrackerApp:
             return """
             <section class='section-block panel-card'>
               <h3>ICHRA Setup Application Center</h3>
-              <p class='subtitle'>Create an employer first, then initialize and manage ICHRA artifacts from here.</p>
+              <p class='subtitle'>Create an employer first, then initialize and manage ICHRA applications from here.</p>
             </section>
             """
 
@@ -2124,20 +2115,20 @@ class TaskTrackerApp:
 
         return f"""
         <section class='section-block panel-card artifact-center'>
-          <h3>ICHRA Setup Artifact Workspace</h3>
-          <p class='subtitle'>Every ICHRA application is an employer-owned artifact. Start it once, save drafts anytime, and submit only when complete.</p>
+          <h3>ICHRA Setup Application Workspace</h3>
+          <p class='subtitle'>Every ICHRA application is employer-owned. Start it once, save drafts anytime, and submit only when complete.</p>
           <div class='artifact-meta-grid'>
             <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
-            <article><h4>Artifact Status</h4><p>{status_label}</p></article>
+            <article><h4>Application Status</h4><p>{status_label}</p></article>
             <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
           </div>
 
           <form method='get' action='/' class='inline-form artifact-picker'>
             <input type='hidden' name='view' value='application' />
-            <label>Switch employer artifact
+            <label>Switch employer application
               <select name='employer_id'>{employer_options}</select>
             </label>
-            <button type='submit' class='secondary'>Load Artifact</button>
+            <button type='submit' class='secondary'>Load Application</button>
           </form>
 
           <form method='post' action='/applications/ichra/save' class='form-grid artifact-form'>
@@ -2168,7 +2159,7 @@ class TaskTrackerApp:
             <label>Agent Support *<input name='agent_support' value='{html.escape(artifact_defaults['agent_support'])}' required /></label>
             <div class='artifact-actions'>
               <button type='submit' name='artifact_action' value='save' class='secondary'>Save Draft</button>
-              <button type='submit' name='artifact_action' value='submit'>Submit Artifact</button>
+              <button type='submit' name='artifact_action' value='submit'>Submit Application</button>
             </div>
           </form>
         </section>
