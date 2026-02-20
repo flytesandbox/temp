@@ -422,7 +422,7 @@ class TaskTrackerApp:
 
     def get_user(self, username: str):
         db = self.db()
-        user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        user = db.execute("SELECT * FROM users WHERE username = ? AND is_active = 1", (username,)).fetchone()
         db.close()
         return user
 
@@ -442,7 +442,7 @@ class TaskTrackerApp:
             FROM users u
             LEFT JOIN task_completions tc
                 ON tc.user_id = u.id AND tc.task_id = 1
-            WHERE u.role != 'employer'
+            WHERE u.role != 'employer' AND u.is_active = 1
             ORDER BY u.id
             """
         ).fetchall()
@@ -455,7 +455,7 @@ class TaskTrackerApp:
             """
             SELECT username, role, password_hint
             FROM users
-            WHERE role IN ('super_admin', 'admin', 'broker')
+            WHERE role IN ('super_admin', 'admin', 'broker') AND is_active = 1
             ORDER BY role, last_login_at DESC, id DESC
             """
         ).fetchall()
@@ -535,7 +535,7 @@ class TaskTrackerApp:
                    COALESCE(SUM(CASE WHEN u.role = 'broker' THEN 1 ELSE 0 END), 0) AS broker_count,
                    COALESCE(SUM(CASE WHEN u.role = 'employer' THEN 1 ELSE 0 END), 0) AS employer_count
             FROM teams t
-            LEFT JOIN users u ON u.team_id = t.id
+            LEFT JOIN users u ON u.team_id = t.id AND u.is_active = 1
             GROUP BY t.id
             ORDER BY t.name
             """
@@ -545,7 +545,7 @@ class TaskTrackerApp:
 
     def list_assignable_admins(self):
         db = self.db()
-        rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' ORDER BY username").fetchall()
+        rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY username").fetchall()
         db.close()
         return rows
 
@@ -557,7 +557,7 @@ class TaskTrackerApp:
 
     def assign_admin_to_team(self, admin_user_id: int, team_id: int):
         db = self.db()
-        admin = db.execute("SELECT id FROM users WHERE id = ? AND role = 'admin'", (admin_user_id,)).fetchone()
+        admin = db.execute("SELECT id FROM users WHERE id = ? AND role = 'admin' AND is_active = 1", (admin_user_id,)).fetchone()
         team = db.execute("SELECT id FROM teams WHERE id = ?", (team_id,)).fetchone()
         if not admin or not team:
             db.close()
@@ -598,8 +598,8 @@ class TaskTrackerApp:
                 SELECT e.*, u.username AS portal_username,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id
-                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 ORDER BY e.created_at DESC
                 """
             ).fetchall()
@@ -609,10 +609,10 @@ class TaskTrackerApp:
                 SELECT e.*, u.username AS portal_username,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id
-                LEFT JOIN users broker ON broker.id = e.broker_user_id
-                LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id
-                LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id
+                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
+                LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id AND owner_admin.is_active = 1
+                LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id AND employer_user.is_active = 1
                 WHERE (
                     e.primary_user_id = ?
                     OR e.broker_user_id = ?
@@ -630,8 +630,8 @@ class TaskTrackerApp:
                 SELECT e.*, u.username AS portal_username,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id
-                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 WHERE e.linked_user_id = ?
                 ORDER BY e.created_at DESC
                 """,
@@ -645,13 +645,13 @@ class TaskTrackerApp:
     def get_manageable_brokers(self, session_user):
         db = self.db()
         if session_user["role"] == "super_admin":
-            rows = db.execute("SELECT id, username, display_name FROM users WHERE role = 'broker' ORDER BY username").fetchall()
+            rows = db.execute("SELECT id, username, display_name FROM users WHERE role = 'broker' AND is_active = 1 ORDER BY username").fetchall()
         elif session_user["role"] == "admin":
             rows = db.execute(
                 """
                 SELECT id, username, display_name
                 FROM users
-                WHERE role = 'broker' AND team_id = ?
+                WHERE role = 'broker' AND team_id = ? AND is_active = 1
                 ORDER BY username
                 """,
                 (session_user["team_id"],),
@@ -661,7 +661,7 @@ class TaskTrackerApp:
                 """
                 SELECT id, username, display_name
                 FROM users
-                WHERE role = 'broker' AND id = ?
+                WHERE role = 'broker' AND id = ? AND is_active = 1
                 ORDER BY username
                 """,
                 (session_user["id"],),
@@ -919,7 +919,10 @@ class TaskTrackerApp:
         raw = self.unsign(signed.value)
         if not raw or not raw.startswith("uid:"):
             return None
-        return self.get_user_by_id(int(raw.replace("uid:", "")))
+        user = self.get_user_by_id(int(raw.replace("uid:", "")))
+        if not user or not user["is_active"]:
+            return None
+        return user
 
     def consume_flash(self, cookie: cookies.SimpleCookie):
         flash_cookie = cookie.get("flash")
@@ -1151,6 +1154,8 @@ class TaskTrackerApp:
         target = self.get_user_by_id(user_id)
         if not target:
             return self.redirect(start_response, "/?view=notifications", flash=("error", "Target user not found."))
+        if not target["is_active"]:
+            return self.redirect(start_response, "/?view=notifications", flash=("error", "Target user is deactivated."))
         if session_user["role"] == "admin" and target["role"] not in {"admin", "super_admin"}:
             return self.redirect(start_response, "/?view=notifications", flash=("error", "Admins can assign notes only to admin or super admin users."))
         self.create_notification(user_id, message)

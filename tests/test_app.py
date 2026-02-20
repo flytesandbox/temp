@@ -729,5 +729,54 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(dict(sent["headers"]).get("Location"), "/?view=notifications")
 
+    def test_deactivated_admin_hidden_from_team_administration_dropdown(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=inactiveadmin&password=user&role=admin",
+            cookie_header=super_cookie,
+        )
+
+        user_row = self.app.get_user("inactiveadmin")
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/update",
+            body=f"user_id={user_row['id']}&username=inactiveadmin&role=admin&is_active=0&password=",
+            cookie_header=super_cookie,
+        )
+
+        team_view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=super_cookie)
+        self.assertNotIn("inactiveadmin", team_view["body"])
+
+    def test_deactivated_broker_hidden_from_system_lists(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=hiddenbroker&password=user&role=broker",
+            cookie_header=super_cookie,
+        )
+
+        user_row = self.app.get_user("hiddenbroker")
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/update",
+            body=f"user_id={user_row['id']}&username=hiddenbroker&role=broker&is_active=0&password=",
+            cookie_header=super_cookie,
+        )
+
+        login_page = call_app(self.app, method="GET", path="/login")
+        self.assertNotIn("hiddenbroker", login_page["body"])
+
+        notification_view = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=super_cookie)
+        self.assertNotIn("hiddenbroker (broker)", notification_view["body"])
+
 if __name__ == "__main__":
     unittest.main()
