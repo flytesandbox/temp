@@ -521,10 +521,23 @@ class AppTests(unittest.TestCase):
         )
 
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
+        self.assertIn("Forms and Applications", view["body"])
+        self.assertIn("New Employer Setup Form", view["body"])
         self.assertIn("ICHRA Setup Application Workspace", view["body"])
         self.assertIn("Switch employer application", view["body"])
         self.assertIn("Save Draft", view["body"])
         self.assertIn("Submit Application", view["body"])
+
+    def test_application_view_supports_new_employer_setup_form_sub_nav(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=application&artifact_view=form", cookie_header=cookie)
+        self.assertIn("New Employer Setup Form", view["body"])
+        self.assertIn("same intake form available on the login page", view["body"])
+        self.assertIn("action='/signup'", view["body"])
+        self.assertIn("Employer Legal Name", view["body"])
 
     def test_public_signup_creates_employer_request(self):
         response = call_app(
