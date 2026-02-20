@@ -194,6 +194,18 @@ class TaskTrackerApp:
                 role_scope TEXT NOT NULL DEFAULT 'admin',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS team_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                details TEXT NOT NULL DEFAULT '',
+                assigned_to_user_id INTEGER NOT NULL,
+                assigned_by_user_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TEXT
+            );
             """
         )
 
@@ -216,6 +228,12 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
         if "team_id" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN team_id INTEGER")
+
+        team_task_columns = {row[1] for row in db.execute("PRAGMA table_info(team_tasks)").fetchall()}
+        if team_task_columns and "status" not in team_task_columns:
+            db.execute("ALTER TABLE team_tasks ADD COLUMN status TEXT NOT NULL DEFAULT 'open'")
+        if team_task_columns and "completed_at" not in team_task_columns:
+            db.execute("ALTER TABLE team_tasks ADD COLUMN completed_at TEXT")
 
         db.executemany(
             """
@@ -464,6 +482,20 @@ class TaskTrackerApp:
             if session_user["role"] != "super_admin":
                 return self.redirect(start_response, "/?view=team", flash=("error", "Only super admins can assign users to teams."))
             return self.handle_assign_user_to_team(start_response, session_user, self.parse_form(environ))
+
+        if path == "/team-tasks/create" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] == "employer":
+                return self.redirect(start_response, "/?view=dashboard", flash=("error", "Employer accounts are read-only."))
+            return self.handle_create_team_task(start_response, session_user, self.parse_form(environ))
+
+        if path == "/team-tasks/complete" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] == "employer":
+                return self.redirect(start_response, "/?view=dashboard", flash=("error", "Employer accounts are read-only."))
+            return self.handle_complete_team_task(start_response, session_user, self.parse_form(environ))
 
         if path == "/employers/settings" and method == "GET":
             if not session_user:
@@ -844,6 +876,99 @@ class TaskTrackerApp:
         if session_user["role"] == "admin":
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         return target_user["id"] == session_user["id"]
+
+
+    def list_team_members(self, team_id: int):
+        if not team_id:
+            return []
+        db = self.db()
+        rows = db.execute(
+            """
+            SELECT id, username, display_name, role
+            FROM users
+            WHERE team_id = ? AND is_active = 1 AND role != 'employer'
+            ORDER BY CASE role WHEN 'super_admin' THEN 0 WHEN 'admin' THEN 1 WHEN 'broker' THEN 2 ELSE 3 END, username
+            """,
+            (team_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
+    def list_team_tasks(self, team_id: int):
+        if not team_id:
+            return []
+        db = self.db()
+        rows = db.execute(
+            """
+            SELECT tt.id, tt.title, tt.details, tt.status, tt.created_at, tt.completed_at,
+                   assignee.username AS assigned_to_username,
+                   assignee.display_name AS assigned_to_display_name,
+                   assignee.role AS assigned_to_role,
+                   assigner.username AS assigned_by_username,
+                   assigner.display_name AS assigned_by_display_name
+            FROM team_tasks tt
+            JOIN users assignee ON assignee.id = tt.assigned_to_user_id
+            JOIN users assigner ON assigner.id = tt.assigned_by_user_id
+            WHERE tt.team_id = ?
+            ORDER BY
+                CASE tt.status WHEN 'open' THEN 0 ELSE 1 END,
+                tt.created_at DESC,
+                tt.id DESC
+            """,
+            (team_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
+    def create_team_task(self, team_id: int, title: str, details: str, assigned_to_user_id: int, assigned_by_user_id: int):
+        db = self.db()
+        db.execute(
+            """
+            INSERT INTO team_tasks (team_id, title, details, assigned_to_user_id, assigned_by_user_id, status)
+            VALUES (?, ?, ?, ?, ?, 'open')
+            """,
+            (team_id, title, details, assigned_to_user_id, assigned_by_user_id),
+        )
+        db.commit()
+        db.close()
+
+    def complete_team_task(self, task_id: int, user_id: int):
+        db = self.db()
+        row = db.execute(
+            """
+            SELECT tt.id, tt.team_id, tt.status, tt.assigned_to_user_id, u.team_id AS user_team_id
+            FROM team_tasks tt
+            JOIN users u ON u.id = ?
+            WHERE tt.id = ?
+            """,
+            (user_id, task_id),
+        ).fetchone()
+        if not row:
+            db.close()
+            return None, "Task not found."
+        if row["team_id"] != row["user_team_id"]:
+            db.close()
+            return None, "You can only update tasks in your team."
+        if row["assigned_to_user_id"] != user_id:
+            db.close()
+            return None, "Only the assigned user can complete this task."
+        if row["status"] == "completed":
+            db.close()
+            return row, "Task already completed."
+        db.execute(
+            "UPDATE team_tasks SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (task_id,),
+        )
+        db.commit()
+        db.close()
+        return row, None
+
+    def can_assign_task_to_user(self, session_user, target_user):
+        if not target_user or not target_user["is_active"]:
+            return False
+        if session_user["team_id"] is None or target_user["team_id"] is None:
+            return False
+        return session_user["team_id"] == target_user["team_id"] and target_user["role"] in {"super_admin", "admin", "broker"}
 
     def list_notifications(self, user_id: int):
         db = self.db()
@@ -1566,6 +1691,59 @@ class TaskTrackerApp:
         self.log_action(session_user["id"], "team_assignment_updated", "user", user_id, target["username"] if target else "user", f"team_id={team_id}")
         return self.redirect(start_response, "/?view=team", flash=("success", "User reassigned to team."))
 
+
+    def handle_create_team_task(self, start_response, session_user, form):
+        title = form.get("title", "").strip()
+        details = form.get("details", "").strip()
+        if len(title) < 3:
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "Task title must be at least 3 characters."))
+        try:
+            assigned_to_user_id = int(form.get("assigned_to_user_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "Select a valid teammate."))
+
+        target = self.get_user_by_id(assigned_to_user_id)
+        if not self.can_assign_task_to_user(session_user, target):
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "You can only assign tasks within your team."))
+
+        self.create_team_task(
+            team_id=session_user["team_id"],
+            title=title,
+            details=details,
+            assigned_to_user_id=assigned_to_user_id,
+            assigned_by_user_id=session_user["id"],
+        )
+        self.log_action(
+            session_user["id"],
+            "team_task_created",
+            "team_task",
+            assigned_to_user_id,
+            target["username"],
+            f"title={title}",
+        )
+        return self.redirect(start_response, "/?view=dashboard", flash=("success", "Team task assigned."))
+
+    def handle_complete_team_task(self, start_response, session_user, form):
+        try:
+            task_id = int(form.get("task_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "Invalid task."))
+
+        task_row, error = self.complete_team_task(task_id, session_user["id"])
+        if error:
+            flash_type = "success" if error == "Task already completed." else "error"
+            return self.redirect(start_response, "/?view=dashboard", flash=(flash_type, error))
+
+        self.log_action(
+            session_user["id"],
+            "team_task_completed",
+            "team_task",
+            task_id,
+            session_user["username"],
+            "Task completed",
+        )
+        return self.redirect(start_response, "/?view=dashboard", flash=("success", "Task completed."))
+
     def handle_logout(self, start_response):
         headers = [
             ("Location", "/login"),
@@ -1651,18 +1829,11 @@ class TaskTrackerApp:
 
     def render_dashboard(self, start_response, user, flash_message, active_view="dashboard", query=None):
         query = query or {}
-        rows = self.get_users_with_completion(user)
-        status_rows = "".join(
-            (
-                f"<li><span>{html.escape(row['display_name'])}"
-                f" <small>({html.escape(row['username'])})</small></span>"
-                f"<span class='pill {'complete' if row['completed'] else 'pending'}'>"
-                f"{'Completed' if row['completed'] else 'Pending'}</span></li>"
-            )
-            for row in rows
-        )
-
         role = user["role"]
+        team = self.get_team_for_user(user["id"])
+        team_tasks = self.list_team_tasks(user["team_id"]) if user["team_id"] is not None else []
+        team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
+
         employers = self.list_visible_employers(user)
         employer_rows = "".join(
             f"""
@@ -1863,7 +2034,6 @@ class TaskTrackerApp:
               </section>
             """
 
-        team = self.get_team_for_user(user["id"])
         teams = self.list_teams()
         assignable_admins = self.list_assignable_admins()
         team_options = "".join(f"<option value='{row['id']}'>{html.escape(row['name'])}</option>" for row in teams)
@@ -1873,6 +2043,30 @@ class TaskTrackerApp:
             f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
             for row in assignable_users
         )
+        assign_task_user_options = "".join(
+            f"<option value='{row['id']}'>{html.escape(row['display_name'])} ({html.escape(row['username'])} · {html.escape(row['role'])})</option>"
+            for row in team_members
+        )
+        team_task_rows = "".join(
+            f"""
+            <li>
+              <div class='team-task-item'>
+                <div>
+                  <strong>{html.escape(row['title'])}</strong>
+                  <small>Assigned to {html.escape(row['assigned_to_display_name'])} by {html.escape(row['assigned_by_display_name'])}</small>
+                  <small>{html.escape(row['details'] or 'No details provided.')}</small>
+                </div>
+                <div class='team-task-actions'>
+                  <span class='pill {'complete' if row['status'] == 'completed' else 'pending'}'>{'Completed' if row['status'] == 'completed' else 'Open'}</span>
+                  {"<form method='post' action='/team-tasks/complete'><input type='hidden' name='task_id' value='" + str(row['id']) + "' /><button type='submit' class='secondary'>Mark Complete</button></form>" if row['status'] == 'open' and row['assigned_to_username'] == user['username'] and role != 'employer' else ''}
+                </div>
+              </div>
+            </li>
+            """
+            for row in team_tasks
+        )
+        if not team_task_rows:
+            team_task_rows = "<li class='subtitle'>No team tasks yet.</li>"
         notification_targets = self.get_users_with_completion(user)
         notification_target_options = "".join(f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>" for row in notification_targets)
         notification_rows = "".join(
@@ -1947,36 +2141,31 @@ class TaskTrackerApp:
             """
 
         team_sections = [
-            ("completion", "Team Completion Status"),
             ("administration", "Team Administration") if role == "super_admin" else None,
             ("account-management", "Super Admin - Account Management") if role in {"super_admin", "admin", "broker"} else None,
         ]
         team_sections = [section for section in team_sections if section]
-        requested_team_section = (query.get("team_section", [""])[0] or "").strip().lower()
-        available_team_section_keys = {key for key, _ in team_sections}
-        active_team_section = requested_team_section if requested_team_section in available_team_section_keys else team_sections[0][0]
-        team_sub_nav = "".join(
-            f"<a class='nav-link {'active' if active_team_section == key else ''}' href='/?view=team&team_section={key}'>{label}</a>"
-            for key, label in team_sections
-        )
+        if team_sections:
+            requested_team_section = (query.get("team_section", [""])[0] or "").strip().lower()
+            available_team_section_keys = {key for key, _ in team_sections}
+            active_team_section = requested_team_section if requested_team_section in available_team_section_keys else team_sections[0][0]
+            team_sub_nav = "".join(
+                f"<a class='nav-link {'active' if active_team_section == key else ''}' href='/?view=team&team_section={key}'>{label}</a>"
+                for key, label in team_sections
+            )
 
-        team_section_content = ""
-        if active_team_section == "completion":
-            team_section_content = f"""
-            <section class='section-block'>
-              <h3>Team Completion Status · {html.escape(team['name']) if team else 'Unassigned'}</h3>
-              <ul class='status-list'>{status_rows}</ul>
-            </section>
+            team_section_content = ""
+            if active_team_section == "administration":
+                team_section_content = super_admin_team_panel
+            elif active_team_section == "account-management":
+                team_section_content = broker_admin_section
+
+            team_panel = f"""
+                <nav class='dashboard-nav sub-nav'>{team_sub_nav}</nav>
+                {team_section_content}
             """
-        elif active_team_section == "administration":
-            team_section_content = super_admin_team_panel
-        elif active_team_section == "account-management":
-            team_section_content = broker_admin_section
-
-        team_panel = f"""
-            <nav class='dashboard-nav sub-nav'>{team_sub_nav}</nav>
-            {team_section_content}
-        """
+        else:
+            team_panel = "<section class='section-block'><p class='subtitle'>No team administration controls are available for this account.</p></section>"
 
         employer_applications_panel = ""
         header_primary_cta = ""
@@ -2081,8 +2270,18 @@ class TaskTrackerApp:
             else "<a class='nav-link active' href='/?view=application'>Open My Application Workspace</a>"
         )
 
+        team_task_engine_panel = f"""
+            <section class='section-block panel-card'>
+              <h3>Team Task Engine · {html.escape(team['name']) if team else 'Unassigned Team'}</h3>
+              <p class='subtitle'>Assign tasks to anyone in your team, including Super Admin accounts, to build confidence through visible execution.</p>
+              {"<form method='post' action='/team-tasks/create' class='form-grid'><label>Task Title<input name='title' required minlength='3' /></label><label>Task Details<textarea name='details' placeholder='Optional context'></textarea></label><label>Assign To<select name='assigned_to_user_id' required><option value=''>Select team member</option>" + assign_task_user_options + "</select></label><button type='submit'>Assign Team Task</button></form>" if role != 'employer' and assign_task_user_options else "<p class='subtitle'>No assignable team members are currently available.</p>"}
+              <ul class='status-list'>{team_task_rows}</ul>
+            </section>
+        """
+
         dashboard_panel = f"""
             {task_section}
+            {team_task_engine_panel}
             {broker_refer_cta}
             <section class='section-block panel-card ecosystem-callout'>
               <h3>Forms and Applications Ecosystem</h3>
@@ -2094,6 +2293,7 @@ class TaskTrackerApp:
               <div class='stats-grid'>
                 <article><h4>Employers</h4><p>{len(employers)}</p></article>
                 <article><h4>Applications Complete</h4><p>{sum(1 for row in employers if row['application_complete'])}</p></article>
+                <article><h4>Open Team Tasks</h4><p>{sum(1 for row in team_tasks if row['status'] == 'open')}</p></article>
                 <article><h4>Unread Notifications</h4><p>{unseen_count}</p></article>
               </div>
             </section>

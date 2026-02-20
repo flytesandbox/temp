@@ -81,6 +81,51 @@ class AppTests(unittest.TestCase):
 
         self.assertIsNotNone(default_team)
 
+
+    def test_dashboard_shows_team_task_engine(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertIn("Team Task Engine", dashboard["body"])
+        self.assertIn("including Super Admin accounts", dashboard["body"])
+
+    def test_team_task_can_be_assigned_to_super_admin_and_completed_by_assignee(self):
+        admin_cookie = ""
+        admin_login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        admin_cookie = merge_cookies(admin_cookie, admin_login["headers"])
+
+        assign = call_app(
+            self.app,
+            method="POST",
+            path="/team-tasks/create",
+            body="title=Review+Roadmap&details=Please+review+priorities&assigned_to_user_id=3",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(assign["headers"]).get("Location"), "/?view=dashboard")
+
+        db = self.app.db()
+        task = db.execute("SELECT id, assigned_to_user_id, status FROM team_tasks ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+        self.assertEqual(task["assigned_to_user_id"], 3)
+        self.assertEqual(task["status"], "open")
+
+        complete = call_app(
+            self.app,
+            method="POST",
+            path="/team-tasks/complete",
+            body=f"task_id={task['id']}",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(complete["headers"]).get("Location"), "/?view=dashboard")
+
+        db = self.app.db()
+        updated = db.execute("SELECT status, completed_at FROM team_tasks WHERE id = ?", (task["id"],)).fetchone()
+        db.close()
+        self.assertEqual(updated["status"], "completed")
+        self.assertIsNotNone(updated["completed_at"])
+
     def test_dev_log_tab_is_visible_and_lists_pr_history(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
