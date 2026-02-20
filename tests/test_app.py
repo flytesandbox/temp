@@ -481,7 +481,7 @@ class AppTests(unittest.TestCase):
             ),
             cookie_header=employer_cookie,
         )
-        self.assertEqual(dict(submit["headers"]).get("Location"), f"/?view=applications&employer_id={employer['id']}")
+        self.assertEqual(dict(submit["headers"]).get("Location"), f"/?view=application&employer_id={employer['id']}")
 
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertIn("Complete", dashboard["body"])
@@ -949,6 +949,98 @@ class AppTests(unittest.TestCase):
         moved = db.execute("SELECT team_id FROM users WHERE id=?", (subbroker["id"],)).fetchone()
         db.close()
         self.assertEqual(moved["team_id"], east_team["id"])
+
+
+    def test_employer_dashboard_uses_forms_workspace_not_legacy_applications_tab(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Nav+Check&contact_name=Robin&work_email=robin%40nav.com&phone=555"
+                "&company_size=8&industry=Retail&website=https%3A%2F%2Fnav.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role='employer' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        self.assertIn("/?view=application", dashboard["body"])
+        self.assertNotIn("href='/?view=applications'", dashboard["body"])
+
+    def test_submitted_ichra_workspace_locks_until_admin_or_broker_renews(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Lock+Co&contact_name=Jan&work_email=jan%40lock.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Flock.com&state=WA"
+            ),
+            cookie_header=admin_cookie,
+        )
+        db = self.app.db()
+        employer = db.execute("SELECT id, linked_user_id FROM employers WHERE legal_name='Lock Co'").fetchone()
+        employer_user = db.execute("SELECT username FROM users WHERE id = ?", (employer["linked_user_id"],)).fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+
+        submit = call_app(
+            self.app,
+            method="POST",
+            path="/applications/ichra/save",
+            body=(
+                f"employer_id={employer['id']}&artifact_action=submit&desired_start_date=2026-01-01"
+                "&service_type=ICHRA+Documents+Only&primary_first_name=Jan&primary_last_name=Stone"
+                "&primary_email=jan%40lock.com&primary_phone=555-111-2222&legal_name=Lock+Co"
+                "&nature_of_business=Retail&total_employee_count=10&physical_state=WA"
+                "&reimbursement_option=Standard&employee_class_assistance=Yes"
+                "&planned_contribution=400&claim_option=Employer+Managed&agent_support=Broker"
+            ),
+            cookie_header=employer_cookie,
+        )
+        self.assertEqual(dict(submit["headers"]).get("Location"), f"/?view=application&employer_id={employer['id']}")
+
+        locked_save = call_app(
+            self.app,
+            method="POST",
+            path="/applications/ichra/save",
+            body=f"employer_id={employer['id']}&artifact_action=save&legal_name=Lock+Co",
+            cookie_header=employer_cookie,
+        )
+        self.assertEqual(dict(locked_save["headers"]).get("Location"), f"/?view=application&employer_id={employer['id']}")
+
+        admin_renew = call_app(
+            self.app,
+            method="POST",
+            path="/applications/ichra/renew",
+            body=f"employer_id={employer['id']}",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(admin_renew["headers"]).get("Location"), f"/?view=application&employer_id={employer['id']}")
+
+        db = self.app.db()
+        artifact = db.execute("SELECT access_token_status, artifact_status FROM ichra_applications WHERE employer_id = ?", (employer["id"],)).fetchone()
+        db.close()
+        self.assertEqual(artifact["access_token_status"], "active")
+        self.assertEqual(artifact["artifact_status"], "draft")
 
 if __name__ == "__main__":
     unittest.main()
