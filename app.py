@@ -695,6 +695,20 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+    def list_active_users_for_team(self, team_id: int):
+        db = self.db()
+        rows = db.execute(
+            """
+            SELECT id, username, display_name, role
+            FROM users
+            WHERE team_id = ? AND is_active = 1
+            ORDER BY CASE role WHEN 'super_admin' THEN 0 WHEN 'admin' THEN 1 WHEN 'broker' THEN 2 ELSE 3 END, username
+            """,
+            (team_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
     def list_assignable_admins(self):
         db = self.db()
         rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY username").fetchall()
@@ -800,7 +814,7 @@ class TaskTrackerApp:
                 ORDER BY e.created_at DESC
                 """
             ).fetchall()
-        elif session_user["role"] in {"admin", "broker"}:
+        elif session_user["role"] == "admin":
             rows = db.execute(
                 """
                 SELECT e.*, u.username AS portal_username,
@@ -820,6 +834,19 @@ class TaskTrackerApp:
                 ORDER BY e.created_at DESC
                 """,
                 (session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
+            ).fetchall()
+        elif session_user["role"] == "broker":
+            rows = db.execute(
+                """
+                SELECT e.*, u.username AS portal_username,
+                       broker.username AS broker_username
+                FROM employers e
+                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
+                WHERE e.broker_user_id = ?
+                ORDER BY e.created_at DESC
+                """,
+                (session_user["id"],),
             ).fetchall()
         elif session_user["role"] == "employer":
             rows = db.execute(
@@ -919,6 +946,32 @@ class TaskTrackerApp:
         ).fetchall()
         db.close()
         return rows
+
+    def list_visible_team_tasks(self, session_user):
+        if session_user["role"] == "super_admin":
+            db = self.db()
+            rows = db.execute(
+                """
+                SELECT tt.id, tt.title, tt.details, tt.status, tt.created_at, tt.completed_at,
+                       assignee.username AS assigned_to_username,
+                       assignee.display_name AS assigned_to_display_name,
+                       assignee.role AS assigned_to_role,
+                       assigner.username AS assigned_by_username,
+                       assigner.display_name AS assigned_by_display_name
+                FROM team_tasks tt
+                JOIN users assignee ON assignee.id = tt.assigned_to_user_id
+                JOIN users assigner ON assigner.id = tt.assigned_by_user_id
+                ORDER BY
+                    CASE tt.status WHEN 'open' THEN 0 ELSE 1 END,
+                    tt.created_at DESC,
+                    tt.id DESC
+                """
+            ).fetchall()
+            db.close()
+            return rows
+        if session_user["team_id"] is None:
+            return []
+        return self.list_team_tasks(session_user["team_id"])
 
     def create_team_task(self, team_id: int, title: str, details: str, assigned_to_user_id: int, assigned_by_user_id: int):
         db = self.db()
@@ -1831,7 +1884,7 @@ class TaskTrackerApp:
         query = query or {}
         role = user["role"]
         team = self.get_team_for_user(user["id"])
-        team_tasks = self.list_team_tasks(user["team_id"]) if user["team_id"] is not None else []
+        team_tasks = self.list_visible_team_tasks(user)
         team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
 
         employers = self.list_visible_employers(user)
@@ -1861,7 +1914,7 @@ class TaskTrackerApp:
 
         role_banner = {
             "super_admin": "Manage broker accounts and system-wide visibility.",
-            "broker": "Create employers and monitor all forms and applications assigned to your book.",
+            "broker": "Create employers and monitor all ICHRA setup workspaces assigned to your book.",
             "employer": "Review your application and complete outstanding onboarding tasks.",
             "admin": "Create and oversee brokers and employers assigned to your organization.",
         }.get(role, "")
@@ -1878,7 +1931,7 @@ class TaskTrackerApp:
         if role in {"super_admin", "admin", "broker"}:
             nav_links.append(("employers", "Employers"))
         if show_application:
-            nav_links.insert(1, ("application", "Forms and Applications"))
+            nav_links.insert(1, ("application", "ICHRA Setup Workspace"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         if show_settings:
@@ -2120,6 +2173,41 @@ class TaskTrackerApp:
 
         super_admin_team_panel = ""
         if role == "super_admin":
+            active_team_rows = ""
+            active_team_modals = ""
+            for row in teams:
+                members = self.list_active_users_for_team(row["id"])
+                member_rows = "".join(
+                    f"<tr><td>{html.escape(member['display_name'])}</td><td>{html.escape(member['username'])}</td><td>{html.escape(member['role'])}</td></tr>"
+                    for member in members
+                ) or "<tr><td colspan='3'>No active users in this team.</td></tr>"
+                modal_id = f"team-members-{row['id']}"
+                active_team_rows += f"""
+                <tr>
+                  <td>{html.escape(row['name'])}</td>
+                  <td>{row['admin_count']}</td>
+                  <td>{row['broker_count']}</td>
+                  <td>{row['employer_count']}</td>
+                  <td><button type='button' class='table-link as-button' data-modal-open='{modal_id}'>View members</button></td>
+                </tr>
+                """
+                active_team_modals += f"""
+                <div class='modal' id='{modal_id}' aria-hidden='true'>
+                  <div class='modal-backdrop' data-modal-close='{modal_id}'></div>
+                  <section class='modal-card card'>
+                    <button type='button' class='modal-close' aria-label='Close' data-modal-close='{modal_id}'>×</button>
+                    <h3>Active Members · {html.escape(row['name'])}</h3>
+                    <div class='table-wrap'><table class='user-table'>
+                      <thead><tr><th>Name</th><th>Username</th><th>Role</th></tr></thead>
+                      <tbody>{member_rows}</tbody>
+                    </table></div>
+                  </section>
+                </div>
+                """
+
+            if not active_team_rows:
+                active_team_rows = "<tr><td colspan='5'>No active teams yet.</td></tr>"
+
             super_admin_team_panel = f"""
             <section class='section-block panel-card'>
               <h3>Team Administration</h3>
@@ -2137,7 +2225,12 @@ class TaskTrackerApp:
                 <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
                 <button type='submit'>Assign User to Team</button>
               </form>
+              <div class='table-wrap'><table class='user-table'>
+                <thead><tr><th>Active Team</th><th>Admins</th><th>Brokers</th><th>Employers</th><th>Members</th></tr></thead>
+                <tbody>{active_team_rows}</tbody>
+              </table></div>
             </section>
+            {active_team_modals}
             """
 
         team_sections = [
@@ -2187,11 +2280,11 @@ class TaskTrackerApp:
 
             if not employer_profile["ichra_started"]:
                 header_primary_cta = """
-                    <a class='nav-link active' href='/?view=application'>Start ICHRA Application</a>
+                    <a class='nav-link active' href='/?view=application'>Start ICHRA Workspace</a>
                 """
             elif not employer_profile["application_complete"]:
                 header_primary_cta = """
-                    <a class='nav-link active' href='/?view=application'>Continue ICHRA Application</a>
+                    <a class='nav-link active' href='/?view=application'>Continue ICHRA Workspace</a>
                 """
             else:
                 header_primary_cta = "<span class='nav-link active'>Application Submitted</span>"
@@ -2258,14 +2351,14 @@ class TaskTrackerApp:
         """
 
         forms_workspace_hint = {
-            "super_admin": "Govern all forms and application pipelines across teams.",
+            "super_admin": "Govern all ICHRA setup workspace pipelines across teams.",
             "admin": "Tool employer setup and ICHRA artifacts for your assigned organization.",
             "broker": "Guide client onboarding, then launch and monitor ICHRA application progress.",
             "employer": "Use your workspace to complete and submit your ICHRA application artifact.",
-        }.get(role, "Access your forms and application tools.")
+        }.get(role, "Access your ICHRA setup workspace tools.")
 
         forms_workspace_cta = (
-            "<a class='nav-link active' href='/?view=application'>Open Forms and Applications</a>"
+            "<a class='nav-link active' href='/?view=application'>Open ICHRA Setup Workspace</a>"
             if role != "employer"
             else "<a class='nav-link active' href='/?view=application'>Open My Application Workspace</a>"
         )
@@ -2284,7 +2377,7 @@ class TaskTrackerApp:
             {team_task_engine_panel}
             {broker_refer_cta}
             <section class='section-block panel-card ecosystem-callout'>
-              <h3>Forms and Applications Ecosystem</h3>
+              <h3>ICHRA Setup Workspace Ecosystem</h3>
               <p class='subtitle'>{forms_workspace_hint}</p>
               {forms_workspace_cta}
             </section>
@@ -2355,7 +2448,7 @@ class TaskTrackerApp:
         can_open_setup_form = role in {"super_admin", "admin", "broker"}
         artifact_sub_nav = f"""
           <nav class='dashboard-nav sub-nav'>
-            <a class='nav-link {'active' if artifact_view == 'application' else ''}' href='/?view=application&artifact_view=application'>ICHRA Setup Application Workspace</a>
+            <a class='nav-link {'active' if artifact_view == 'application' else ''}' href='/?view=application&artifact_view=application'>ICHRA Setup Workspace</a>
             {"<a class='nav-link " + ("active" if artifact_view == "form" else "") + "' href='/?view=application&artifact_view=form'>New Employer Setup Form</a>" if can_open_setup_form else ""}
           </nav>
         """
@@ -2375,7 +2468,7 @@ class TaskTrackerApp:
             return artifact_sub_nav + """
             <section class='section-block panel-card'>
               <h3>ICHRA Setup Application Center</h3>
-              <p class='subtitle'>Create an employer first, then initialize and manage ICHRA applications from here.</p>
+              <p class='subtitle'>Create an employer first, then initialize and manage their employer-containerized ICHRA setup workspace from here.</p>
             </section>
             """
 
@@ -2434,8 +2527,8 @@ class TaskTrackerApp:
 
         return artifact_sub_nav + f"""
         <section class='section-block panel-card artifact-center'>
-          <h3>ICHRA Setup Application Workspace</h3>
-          <p class='subtitle'>Every ICHRA application is employer-owned. Start it once, save drafts anytime, and submit only when complete.</p>
+          <h3>ICHRA Setup Workspace</h3>
+          <p class='subtitle'>Every ICHRA setup workspace is employer-owned. Start it once, save drafts anytime, and submit only when complete.</p>
           <div class='artifact-meta-grid'>
             <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
             <article><h4>Application Status</h4><p>{status_label}</p></article>
