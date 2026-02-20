@@ -106,6 +106,30 @@ button.secondary {
   flex-wrap: wrap;
 }
 
+.dashboard-subnav {
+  margin-top: 0.7rem;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.sub-nav-link {
+  text-decoration: none;
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #dbe3ff;
+  border-radius: 999px;
+  color: #3b4d84;
+  background: #f7f9ff;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.sub-nav-link.active {
+  border-color: #4558ff;
+  color: #4558ff;
+  background: #eef1ff;
+}
+
 .nav-link {
   text-decoration: none;
   padding: 0.5rem 0.8rem;

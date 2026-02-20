@@ -427,22 +427,32 @@ class TaskTrackerApp:
         db.close()
         return user
 
-    def get_users_with_completion(self):
+    def get_users_with_completion(self, include_inactive: bool = False):
         db = self.db()
+        inactive_filter = "" if include_inactive else " AND u.is_active = 1"
         rows = db.execute(
-            """
+            f"""
             SELECT u.id, u.username, u.display_name, u.role, u.created_by_user_id, u.team_id,
                    u.is_active,
                    CASE WHEN tc.id IS NULL THEN 0 ELSE 1 END AS completed
             FROM users u
             LEFT JOIN task_completions tc
                 ON tc.user_id = u.id AND tc.task_id = 1
-            WHERE u.role != 'employer'
+            WHERE u.role != 'employer'{inactive_filter}
             ORDER BY u.id
             """
         ).fetchall()
         db.close()
         return rows
+
+    def list_users_for_account_admin(self, session_user):
+        all_rows = self.get_users_with_completion()
+        users = [row for row in all_rows if row["role"] != "super_admin"]
+        if session_user["role"] == "admin":
+            return [row for row in users if row["team_id"] == session_user["team_id"] and row["role"] in {"admin", "broker"}]
+        if session_user["role"] == "broker":
+            return [row for row in users if row["id"] == session_user["id"]]
+        return users
 
     def get_login_demo_accounts(self):
         db = self.db()
@@ -450,7 +460,7 @@ class TaskTrackerApp:
             """
             SELECT username, role, password_hint
             FROM users
-            WHERE role IN ('super_admin', 'admin', 'broker')
+            WHERE role IN ('super_admin', 'admin', 'broker') AND is_active = 1
             ORDER BY role, last_login_at DESC, id DESC
             """
         ).fetchall()
@@ -540,7 +550,7 @@ class TaskTrackerApp:
 
     def list_assignable_admins(self):
         db = self.db()
-        rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' ORDER BY username").fetchall()
+        rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY username").fetchall()
         db.close()
         return rows
 
@@ -595,6 +605,7 @@ class TaskTrackerApp:
                 FROM employers e
                 JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id
+                WHERE u.is_active = 1
                 ORDER BY e.created_at DESC
                 """
             ).fetchall()
@@ -615,6 +626,7 @@ class TaskTrackerApp:
                     OR (broker.team_id IS NOT NULL AND broker.team_id = ?)
                     OR (employer_user.team_id IS NOT NULL AND employer_user.team_id = ?)
                 )
+                AND u.is_active = 1
                 ORDER BY e.created_at DESC
                 """,
                 (session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
@@ -627,7 +639,7 @@ class TaskTrackerApp:
                 FROM employers e
                 JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id
-                WHERE e.linked_user_id = ?
+                WHERE e.linked_user_id = ? AND u.is_active = 1
                 ORDER BY e.created_at DESC
                 """,
                 (session_user["id"],),
@@ -640,13 +652,13 @@ class TaskTrackerApp:
     def get_manageable_brokers(self, session_user):
         db = self.db()
         if session_user["role"] == "super_admin":
-            rows = db.execute("SELECT id, username, display_name FROM users WHERE role = 'broker' ORDER BY username").fetchall()
+            rows = db.execute("SELECT id, username, display_name FROM users WHERE role = 'broker' AND is_active = 1 ORDER BY username").fetchall()
         elif session_user["role"] == "admin":
             rows = db.execute(
                 """
                 SELECT id, username, display_name
                 FROM users
-                WHERE role = 'broker' AND team_id = ?
+                WHERE role = 'broker' AND team_id = ? AND is_active = 1
                 ORDER BY username
                 """,
                 (session_user["team_id"],),
@@ -656,7 +668,7 @@ class TaskTrackerApp:
                 """
                 SELECT id, username, display_name
                 FROM users
-                WHERE role = 'broker' AND id = ?
+                WHERE role = 'broker' AND id = ? AND is_active = 1
                 ORDER BY username
                 """,
                 (session_user["id"],),
@@ -1314,25 +1326,41 @@ class TaskTrackerApp:
         unseen_count = sum(1 for item in notifications if not item["seen"])
         employer_profile = employers[0] if role == "employer" and employers else None
 
+        admin_subnav_views = {"team-status", "team-admin", "account-admin"}
         nav_links = [("dashboard", "Dashboard")]
+        if show_application:
+            nav_links.append(("application", "Setup Applications"))
         if role in {"super_admin", "admin", "broker"}:
             nav_links.append(("employers", "Employers"))
         if role == "employer":
             nav_links.append(("applications", "Applications"))
-        if show_application:
-            nav_links.insert(1, ("application", "Setup Applications"))
-        nav_links.append(("team", "Team"))
+        if role == "super_admin":
+            nav_links.append(("team-status", "Admin Operation Dashboard"))
+        else:
+            nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
-        nav_links.append(("devlog", "Dev Log"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
         if show_logs:
             nav_links.append(("logs", "Activity Log"))
+        nav_links.append(("devlog", "Dev Log"))
 
         nav_html = "".join(
-            f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
+            f"<a class='nav-link {'active' if active_view == key or (key == 'team-status' and active_view in admin_subnav_views) else ''}' href='/?view={key}'>{label}</a>"
             for key, label in nav_links
         )
+
+        admin_subnav_html = ""
+        if role == "super_admin":
+            admin_subnav_links = [
+                ("team-status", "Team Completion Status"),
+                ("team-admin", "Team Administration"),
+                ("account-admin", "Super Admin - Account Management"),
+            ]
+            admin_subnav_html = "".join(
+                f"<a class='sub-nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
+                for key, label in admin_subnav_links
+            )
 
         task_section = ""
         if role in {"super_admin", "admin", "broker"}:
@@ -1366,43 +1394,55 @@ class TaskTrackerApp:
         employer_workspace = ""
 
         broker_admin_section = ""
+        account_admin_modal = ""
         if role in {"super_admin", "admin", "broker"}:
-            users_for_admin = [row for row in rows if row["role"] != "super_admin"]
-            if role == "admin":
-                users_for_admin = [row for row in users_for_admin if row["team_id"] == user["team_id"] and row["role"] in {"admin", "broker"}]
-            elif role == "broker":
-                users_for_admin = [row for row in users_for_admin if row["id"] == user["id"]]
+            users_for_admin = self.list_users_for_account_admin(user)
             user_rows = "".join(
                 f"""
                 <tr>
                   <td>{html.escape(row['username'])}</td>
                   <td>{html.escape(row['role'])}</td>
                   <td>{'Active' if row['is_active'] else 'Deactivated'}</td>
-                  <td>
-                    <form method='post' action='/admin/users/update' class='inline-form'>
-                      <input type='hidden' name='user_id' value='{row['id']}' />
-                      <input name='username' value='{html.escape(row['username'])}' required minlength='3' />
-                      <select name='role'>
-                        <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
-                        <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
-                        <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
-                      </select>
-                      <select name='is_active'>
-                        <option value='1' {'selected' if row['is_active'] else ''}>active</option>
-                        <option value='0' {'selected' if not row['is_active'] else ''}>deactivated</option>
-                      </select>
-                      <input name='password' type='password' placeholder='new password (optional)' />
-                      <button type='submit' class='secondary'>Save</button>
-                    </form>
-                  </td>
+                  <td><button type='button' class='table-link as-button' data-modal-open='user-settings-modal-{row['id']}'>Open settings</button></td>
                 </tr>
                 """
                 for row in users_for_admin
             )
             create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option>"
+            account_admin_modal = "".join(
+                f"""
+                <div class='modal' id='user-settings-modal-{row['id']}' aria-hidden='true'>
+                  <div class='modal-backdrop' data-modal-close='user-settings-modal-{row['id']}'></div>
+                  <section class='modal-card card'>
+                    <button type='button' class='modal-close' aria-label='Close' data-modal-close='user-settings-modal-{row['id']}'>×</button>
+                    <h3>User Settings · {html.escape(row['username'])}</h3>
+                    <form method='post' action='/admin/users/update' class='form-grid'>
+                      <input type='hidden' name='user_id' value='{row['id']}' />
+                      <label>Username<input name='username' value='{html.escape(row['username'])}' required minlength='3' /></label>
+                      <label>Role
+                        <select name='role'>
+                          <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
+                          <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
+                          <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
+                        </select>
+                      </label>
+                      <label>Status
+                        <select name='is_active'>
+                          <option value='1' {'selected' if row['is_active'] else ''}>active</option>
+                          <option value='0' {'selected' if not row['is_active'] else ''}>deactivated</option>
+                        </select>
+                      </label>
+                      <label>New Password<input name='password' type='password' placeholder='new password (optional)' /></label>
+                      <button type='submit' class='secondary'>Save</button>
+                    </form>
+                  </section>
+                </div>
+                """
+                for row in users_for_admin
+            )
             broker_admin_section = f"""
               <section class='section-block'>
-                <h3>{'Super Admin · Account Management' if role == 'super_admin' else ('Admin · Assigned Organizations' if role == 'admin' else 'Broker · Team Accounts')}</h3>
+                <h3>{'Super Admin - Account Management' if role == 'super_admin' else ('Admin · Assigned Organizations' if role == 'admin' else 'Broker · Team Accounts')}</h3>
                 <form method='post' action='/admin/users/create' class='inline-form'>
                   <input name='username' placeholder='new username' required minlength='3' />
                   <select name='role'>{create_role_options}</select>
@@ -1528,11 +1568,15 @@ class TaskTrackerApp:
             </section>
             """
 
-        team_panel = f"""
+        team_status_section = f"""
             <section class='section-block'>
               <h3>Team Completion Status · {html.escape(team['name']) if team else 'Unassigned'}</h3>
               <ul class='status-list'>{status_rows}</ul>
             </section>
+        """
+
+        team_panel = f"""
+            {team_status_section}
             {super_admin_team_panel}
             {broker_admin_section}
         """
@@ -1657,6 +1701,9 @@ class TaskTrackerApp:
         panel_lookup = {
             "dashboard": dashboard_panel,
             "team": team_panel,
+            "team-status": team_status_section if role == "super_admin" else team_panel,
+            "team-admin": super_admin_team_panel if role == "super_admin" else team_panel,
+            "account-admin": broker_admin_section if role in {"super_admin", "admin", "broker"} else "",
             "application": self.render_ichra_application_form(user) if show_application else "",
             "employers": employers_panel,
             "applications": employer_applications_panel if role == "employer" else employers_panel,
@@ -1683,9 +1730,11 @@ class TaskTrackerApp:
                 <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
               </header>
               <nav class='dashboard-nav'>{nav_html}</nav>
+              {f"<nav class='dashboard-subnav'>{admin_subnav_html}</nav>" if admin_subnav_html and active_view in admin_subnav_views else ''}
               {active_panel}
             </section>
             {employer_application_modal}
+            {account_admin_modal}
             """
         html_doc = self.html_page("Dashboard", html_body)
         headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
