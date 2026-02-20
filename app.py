@@ -64,6 +64,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 29, "change": "Reverted PR #28.", "result": "Dashboard/settings behavior returned to known-stable implementation.", "why": "Rollback after issues with the redesign/toggle behavior."},
     {"pr": 30, "change": "Fixed employer app toggles and delivered an updated settings dashboard layout.", "result": "Redesign landed with corrected behavior.", "why": "Reapply UX improvements without the regressions that triggered the prior revert."},
     {"pr": 31, "change": "Made dashboard headers sticky with a scroll-condensed state and added a PR checklist reminder for Dev Log updates.", "result": "Long pages now keep context visible while scrolling and the merge process has an explicit Dev Log checkpoint.", "why": "Improve usability across long forms/lists and prevent Development Log drift from missed entries."},
+    {"pr": 32, "change": "Extended Forms and Applications into every role workspace with permission-aware tooling.", "result": "All users can access the ecosystem workspace while role-specific actions are clearly surfaced in the UI.", "why": "Ensure functional completeness of forms/application flows without exposing unsafe actions to restricted user types."},
 ]
 
 
@@ -1629,7 +1630,7 @@ class TaskTrackerApp:
             "admin": "Create and oversee brokers and employers assigned to your organization.",
         }.get(role, "")
 
-        show_application = role in {"super_admin", "admin", "broker"}
+        show_application = role in {"super_admin", "admin", "broker", "employer"}
         show_settings = role in {"super_admin", "admin", "broker", "employer"}
         show_logs = role == "super_admin"
 
@@ -2004,9 +2005,27 @@ class TaskTrackerApp:
             </section>
         """
 
+        forms_workspace_hint = {
+            "super_admin": "Govern all forms and application pipelines across teams.",
+            "admin": "Tool employer setup and ICHRA artifacts for your assigned organization.",
+            "broker": "Guide client onboarding, then launch and monitor ICHRA application progress.",
+            "employer": "Use your workspace to complete and submit your ICHRA application artifact.",
+        }.get(role, "Access your forms and application tools.")
+
+        forms_workspace_cta = (
+            "<a class='nav-link active' href='/?view=application'>Open Forms and Applications</a>"
+            if role != "employer"
+            else "<a class='nav-link active' href='/?view=application'>Open My Application Workspace</a>"
+        )
+
         dashboard_panel = f"""
             {task_section}
             {broker_refer_cta}
+            <section class='section-block panel-card ecosystem-callout'>
+              <h3>Forms and Applications Ecosystem</h3>
+              <p class='subtitle'>{forms_workspace_hint}</p>
+              {forms_workspace_cta}
+            </section>
             <section class='section-block'>
               <h3>Workflow Snapshot</h3>
               <div class='stats-grid'>
@@ -2069,14 +2088,23 @@ class TaskTrackerApp:
         return [html_doc.encode("utf-8")]
 
     def render_ichra_application_form(self, user, selected_employer_id: int | None = None, artifact_view: str = "application"):
+        role = user["role"]
+        can_open_setup_form = role in {"super_admin", "admin", "broker"}
         artifact_sub_nav = f"""
           <nav class='dashboard-nav sub-nav'>
             <a class='nav-link {'active' if artifact_view == 'application' else ''}' href='/?view=application&artifact_view=application'>ICHRA Setup Application Workspace</a>
-            <a class='nav-link {'active' if artifact_view == 'form' else ''}' href='/?view=application&artifact_view=form'>New Employer Setup Form</a>
+            {"<a class='nav-link " + ("active" if artifact_view == "form" else "") + "' href='/?view=application&artifact_view=form'>New Employer Setup Form</a>" if can_open_setup_form else ""}
           </nav>
         """
 
         if artifact_view == "form":
+            if not can_open_setup_form:
+                return artifact_sub_nav + """
+                <section class='section-block panel-card'>
+                  <h3>Permission Scoped</h3>
+                  <p class='subtitle'>Employer users can complete their own ICHRA artifact, but cannot create new employer setup records.</p>
+                </section>
+                """
             return artifact_sub_nav + self.render_new_employer_setup_form()
 
         visible_employers = self.list_visible_employers(user)

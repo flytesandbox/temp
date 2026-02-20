@@ -653,3 +653,8 @@ button {
 .modal-card.artifact-modal {
   width: min(900px, 94vw);
 }
+
+.ecosystem-callout {
+  background: linear-gradient(130deg, #eef3ff, #f7fffb);
+  border-color: #cfddff;
+}
