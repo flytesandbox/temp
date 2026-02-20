@@ -446,7 +446,7 @@ class AppTests(unittest.TestCase):
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
         self.assertIn("ICHRA Application", view["body"])
         self.assertIn("Existing Employer", view["body"])
-        self.assertIn("Basic Employer Application", view["body"])
+        self.assertIn("Employer Setup Form", view["body"])
         self.assertIn("data-panel-mode='basic' hidden", view["body"])
 
     def test_public_signup_creates_employer_request(self):
@@ -643,6 +643,62 @@ class AppTests(unittest.TestCase):
         admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
         logs_view = call_app(self.app, method="GET", path="/", query_string="view=logs&action=login", cookie_header=admin_cookie)
         self.assertIn("Clear Filters", logs_view["body"])
+
+
+    def test_employer_applications_open_in_modal(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Modal+Co&contact_name=Mo&work_email=mo%40modal.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fmodal.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role='employer' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+        view = call_app(self.app, method="GET", path="/", query_string="view=applications", cookie_header=employer_cookie)
+        self.assertIn("data-modal-open='ichra-application-modal'", view["body"])
+
+    def test_super_admin_team_management_forms_present(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        self.assertIn("Team Administration", view["body"])
+        self.assertIn("/teams/create", view["body"])
+        self.assertIn("/teams/assign-admin", view["body"])
+
+    def test_admin_can_send_notification_to_super_admin(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=teamadmin&password=user&role=admin",
+            cookie_header=admin_cookie,
+        )
+
+        team_admin_cookie = ""
+        team_admin_cookie = merge_cookies(team_admin_cookie, call_app(self.app, method="POST", path="/login", body="username=teamadmin&password=user")["headers"])
+        sent = call_app(
+            self.app,
+            method="POST",
+            path="/notifications/create",
+            body=f"user_id={self.app.get_user('admin')['id']}&message=Ops+note",
+            cookie_header=team_admin_cookie,
+        )
+        self.assertEqual(dict(sent["headers"]).get("Location"), "/?view=notifications")
 
 if __name__ == "__main__":
     unittest.main()
