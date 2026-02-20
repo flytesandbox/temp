@@ -658,3 +658,23 @@ button {
   background: linear-gradient(130deg, #eef3ff, #f7fffb);
   border-color: #cfddff;
 }
+
+.team-task-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  width: 100%;
+}
+
+.team-task-item small {
+  display: block;
+  color: #5d6787;
+  margin-top: 0.25rem;
+}
+
+.team-task-actions {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+}
