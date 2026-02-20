@@ -1624,7 +1624,7 @@ class TaskTrackerApp:
 
         role_banner = {
             "super_admin": "Manage broker accounts and system-wide visibility.",
-            "broker": "Create employers and monitor all applications assigned to your book.",
+            "broker": "Create employers and monitor all forms and applications assigned to your book.",
             "employer": "Review your application and complete outstanding onboarding tasks.",
             "admin": "Create and oversee brokers and employers assigned to your organization.",
         }.get(role, "")
@@ -1643,7 +1643,7 @@ class TaskTrackerApp:
         if role == "employer":
             nav_links.append(("applications", "Applications"))
         if show_application:
-            nav_links.insert(1, ("application", "Setup Applications"))
+            nav_links.insert(1, ("application", "Forms and Applications"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         if show_settings:
@@ -2019,6 +2019,9 @@ class TaskTrackerApp:
         """
 
         selected_employer_id = None
+        artifact_view = (query.get("artifact_view", ["application"])[0] or "application").strip().lower()
+        if artifact_view not in {"application", "form"}:
+            artifact_view = "application"
         try:
             selected_employer_id = int(query.get("employer_id", [""])[0]) if query.get("employer_id") else None
         except ValueError:
@@ -2027,7 +2030,7 @@ class TaskTrackerApp:
         panel_lookup = {
             "dashboard": dashboard_panel,
             "team": team_panel,
-            "application": self.render_ichra_application_form(user, selected_employer_id=selected_employer_id) if show_application else "",
+            "application": self.render_ichra_application_form(user, selected_employer_id=selected_employer_id, artifact_view=artifact_view) if show_application else "",
             "employers": employers_panel,
             "applications": employer_applications_panel if role == "employer" else employers_panel,
             "notifications": notifications_panel,
@@ -2065,10 +2068,20 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_ichra_application_form(self, user, selected_employer_id: int | None = None):
+    def render_ichra_application_form(self, user, selected_employer_id: int | None = None, artifact_view: str = "application"):
+        artifact_sub_nav = f"""
+          <nav class='dashboard-nav sub-nav'>
+            <a class='nav-link {'active' if artifact_view == 'application' else ''}' href='/?view=application&artifact_view=application'>ICHRA Setup Application Workspace</a>
+            <a class='nav-link {'active' if artifact_view == 'form' else ''}' href='/?view=application&artifact_view=form'>New Employer Setup Form</a>
+          </nav>
+        """
+
+        if artifact_view == "form":
+            return artifact_sub_nav + self.render_new_employer_setup_form()
+
         visible_employers = self.list_visible_employers(user)
         if not visible_employers:
-            return """
+            return artifact_sub_nav + """
             <section class='section-block panel-card'>
               <h3>ICHRA Setup Application Center</h3>
               <p class='subtitle'>Create an employer first, then initialize and manage ICHRA applications from here.</p>
@@ -2113,7 +2126,7 @@ class TaskTrackerApp:
             for row in visible_employers
         )
 
-        return f"""
+        return artifact_sub_nav + f"""
         <section class='section-block panel-card artifact-center'>
           <h3>ICHRA Setup Application Workspace</h3>
           <p class='subtitle'>Every ICHRA application is employer-owned. Start it once, save drafts anytime, and submit only when complete.</p>
@@ -2161,6 +2174,21 @@ class TaskTrackerApp:
               <button type='submit' name='artifact_action' value='save' class='secondary'>Save Draft</button>
               <button type='submit' name='artifact_action' value='submit'>Submit Application</button>
             </div>
+          </form>
+        </section>
+        """
+
+    def render_new_employer_setup_form(self):
+        return """
+        <section class='section-block panel-card'>
+          <h3>New Employer Setup Form</h3>
+          <p class='subtitle'>This is the same intake form available on the login page as the public entry point for new employers.</p>
+          <form method='post' action='/signup' class='form-grid'>
+            <label>Employer Legal Name <input type='text' name='legal_name' required /></label>
+            <label>Contact Name <input type='text' name='prospect_name' required /></label>
+            <label>Work Email <input type='email' name='prospect_email' required /></label>
+            <label>Phone <input type='text' name='prospect_phone' /></label>
+            <button type='submit'>Submit Employer Request</button>
           </form>
         </section>
         """
