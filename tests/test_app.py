@@ -355,7 +355,7 @@ class AppTests(unittest.TestCase):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
 
-        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
         self.assertIn("Team", view["body"])
         self.assertIn("Account Management", view["body"])
 
@@ -702,7 +702,7 @@ class AppTests(unittest.TestCase):
     def test_super_admin_team_management_forms_present(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
-        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
         self.assertIn("Team Administration", view["body"])
         self.assertIn("/teams/create", view["body"])
         self.assertIn("/teams/assign-admin", view["body"])
