@@ -603,3 +603,53 @@ button {
   padding: 0;
   cursor: pointer;
 }
+
+.artifact-center {
+  background: linear-gradient(180deg, #f8faff, #ffffff);
+  border-color: #d8e4ff;
+}
+
+.artifact-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.65rem;
+  margin: 0.75rem 0 1rem;
+}
+
+.artifact-meta-grid article {
+  border: 1px solid #dbe5ff;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  background: #fff;
+}
+
+.artifact-meta-grid h4 {
+  margin: 0 0 0.2rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+  color: #5e6f9e;
+  text-transform: uppercase;
+}
+
+.artifact-meta-grid p {
+  margin: 0;
+  font-weight: 700;
+}
+
+.artifact-form h4 {
+  margin: 0.4rem 0 0;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.artifact-actions button {
+  flex: 1 1 190px;
+}
+
+.modal-card.artifact-modal {
+  width: min(900px, 94vw);
+}

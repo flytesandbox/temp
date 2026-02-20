@@ -431,11 +431,11 @@ class AppTests(unittest.TestCase):
             call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
-        self.assertIn("Finish ICHRA Setup Application", dashboard["body"])
+        self.assertIn("Continue ICHRA Artifact", dashboard["body"])
         notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=employer_cookie)
         self.assertIn("ready and waiting for you to finish", notifications["body"])
 
-    def test_employer_can_complete_application_without_incomplete_toggle(self):
+    def test_employer_can_submit_ichra_artifact(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
         call_app(
@@ -464,13 +464,25 @@ class AppTests(unittest.TestCase):
             body="",
             cookie_header=employer_cookie,
         )
-        call_app(
+        db = self.app.db()
+        employer = db.execute("SELECT id FROM employers WHERE linked_user_id = (SELECT id FROM users WHERE username = ?)", (employer_user["username"],)).fetchone()
+        db.close()
+        submit = call_app(
             self.app,
             method="POST",
-            path="/employers/start-ichra",
-            body="",
+            path="/applications/ichra/save",
+            body=(
+                f"employer_id={employer['id']}&artifact_action=submit&desired_start_date=2026-01-01"
+                "&service_type=ICHRA+Documents+Only&primary_first_name=Toni&primary_last_name=Stone"
+                "&primary_email=toni%40apply.com&primary_phone=555-111-2222&legal_name=Apply+Now"
+                "&nature_of_business=Retail&total_employee_count=10&physical_state=WA"
+                "&reimbursement_option=Standard&employee_class_assistance=Yes"
+                "&planned_contribution=400&claim_option=Employer+Managed&agent_support=Broker"
+            ),
             cookie_header=employer_cookie,
         )
+        self.assertEqual(dict(submit["headers"]).get("Location"), f"/?view=applications&employer_id={employer['id']}")
+
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertIn("Complete", dashboard["body"])
 
@@ -493,16 +505,26 @@ class AppTests(unittest.TestCase):
         self.assertIn("Open New Employer Setup", login_page["body"])
         self.assertIn("new-employer-modal", login_page["body"])
 
-    def test_application_view_renders_toggle_panels(self):
+    def test_application_view_renders_artifact_workspace(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         cookie = merge_cookies(cookie, login["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Artifact+View&contact_name=Jamie&work_email=jamie%40artifact.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Fartifact.com&state=TX"
+            ),
+            cookie_header=cookie,
+        )
 
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
-        self.assertIn("ICHRA Application", view["body"])
-        self.assertIn("Existing Employer", view["body"])
-        self.assertIn("Employer Setup Form", view["body"])
-        self.assertIn("data-panel-mode='basic' hidden", view["body"])
+        self.assertIn("ICHRA Setup Artifact Workspace", view["body"])
+        self.assertIn("Switch employer artifact", view["body"])
+        self.assertIn("Save Draft", view["body"])
+        self.assertIn("Submit Artifact", view["body"])
 
     def test_public_signup_creates_employer_request(self):
         response = call_app(
