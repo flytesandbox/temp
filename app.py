@@ -17,6 +17,13 @@ ALLOWED_THEMES = {"default", "sunset", "midnight"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
 ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 
+
+def db_connect(db_path: str):
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
 DEV_LOG_ENTRIES = [
     {"pr": 1, "change": "Built the first monolith task tracker shell.", "result": "Shipped an initial login + task completion flow as a runnable baseline.", "why": "Establish a deployable product foundation before layering in infrastructure and roles."},
     {"pr": 2, "change": "Added guidance for connecting the repository to Linode.", "result": "Deployment setup became documented and repeatable.", "why": "Reduce onboarding friction and avoid one-off deploy knowledge."},
@@ -63,7 +70,7 @@ class TaskTrackerApp:
         self.init_db()
 
     def init_db(self) -> None:
-        db = sqlite3.connect(self.db_path)
+        db = db_connect(self.db_path)
         db.executescript(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -214,7 +221,7 @@ class TaskTrackerApp:
             db.execute("INSERT INTO teams (name, created_by_user_id) VALUES ('Core Admin Team', 1)")
             default_team_id = db.execute("SELECT last_insert_rowid() AS i").fetchone()[0]
         else:
-            default_team_id = default_team["id"]
+            default_team_id = default_team["id"] if hasattr(default_team, "keys") else default_team[0]
         db.execute(
             """
             UPDATE users
@@ -411,9 +418,7 @@ class TaskTrackerApp:
         return {k: v[0] for k, v in data.items()}
 
     def db(self):
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return db_connect(self.db_path)
 
     def get_user(self, username: str):
         db = self.db()

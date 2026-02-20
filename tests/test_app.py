@@ -52,6 +52,35 @@ class AppTests(unittest.TestCase):
         self.tmp.cleanup()
 
 
+    def test_app_boots_with_fresh_database(self):
+        app = TaskTrackerApp(db_path=str(Path(self.tmp.name) / "fresh.db"), secret_key="test-secret")
+        self.assertIsNotNone(app)
+
+        db = app.db()
+        default_team = db.execute("SELECT id FROM teams WHERE name = 'Core Admin Team' LIMIT 1").fetchone()
+        db.close()
+
+        self.assertIsNotNone(default_team)
+
+    def test_app_boots_with_existing_default_team_row(self):
+        existing_db = Path(self.tmp.name) / "existing.db"
+        app = TaskTrackerApp(db_path=str(existing_db), secret_key="test-secret")
+
+        db = app.db()
+        db.execute("DELETE FROM teams")
+        db.execute("INSERT INTO teams (name, created_by_user_id) VALUES (?, ?)", ("Core Admin Team", 1))
+        db.commit()
+        db.close()
+
+        restarted_app = TaskTrackerApp(db_path=str(existing_db), secret_key="test-secret")
+        self.assertIsNotNone(restarted_app)
+
+        check_db = restarted_app.db()
+        default_team = check_db.execute("SELECT id FROM teams WHERE name = 'Core Admin Team' LIMIT 1").fetchone()
+        check_db.close()
+
+        self.assertIsNotNone(default_team)
+
     def test_dev_log_tab_is_visible_and_lists_pr_history(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
