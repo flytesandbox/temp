@@ -299,7 +299,7 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertNotIn("User Settings", dashboard["body"])
         self.assertNotIn("Admin · Account Management", dashboard["body"])
-        self.assertIn("Applications", dashboard["body"])
+        self.assertIn("My ICHRA Setup Application", dashboard["body"])
         self.assertNotIn("href='/?view=employers'", dashboard["body"])
 
     def test_employer_visibility_is_limited_to_creator_scope(self):
@@ -397,6 +397,32 @@ class AppTests(unittest.TestCase):
         self.assertIn("broker2", dashboard["body"])
 
 
+    def test_broker_cannot_see_other_broker_employers(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(self.app, method="POST", path="/admin/users/create", body="username=brokera&password=user&role=broker", cookie_header=super_cookie)
+        call_app(self.app, method="POST", path="/admin/users/create", body="username=brokerb&password=user&role=broker", cookie_header=super_cookie)
+
+        broker_a_cookie = ""
+        broker_a_cookie = merge_cookies(broker_a_cookie, call_app(self.app, method="POST", path="/login", body="username=brokera&password=user")["headers"])
+        broker_b_cookie = ""
+        broker_b_cookie = merge_cookies(broker_b_cookie, call_app(self.app, method="POST", path="/login", body="username=brokerb&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Broker+A+Client&contact_name=A+Owner&work_email=a%40client.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fa.com&state=WA"
+            ),
+            cookie_header=broker_a_cookie,
+        )
+
+        broker_b_view = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=broker_b_cookie)
+        self.assertNotIn("Broker A Client", broker_b_view["body"])
+
+
     def test_employer_application_status_shows_not_started_before_ichra(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
@@ -476,7 +502,7 @@ class AppTests(unittest.TestCase):
             call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
-        self.assertIn("Continue ICHRA Application", dashboard["body"])
+        self.assertIn("Continue ICHRA Workspace", dashboard["body"])
         notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=employer_cookie)
         self.assertIn("ready and waiting for you to finish", notifications["body"])
 
@@ -566,9 +592,9 @@ class AppTests(unittest.TestCase):
         )
 
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
-        self.assertIn("Forms and Applications", view["body"])
+        self.assertIn("ICHRA Setup Workspace", view["body"])
         self.assertIn("New Employer Setup Form", view["body"])
-        self.assertIn("ICHRA Setup Application Workspace", view["body"])
+        self.assertIn("ICHRA Setup Workspace", view["body"])
         self.assertIn("Switch employer application", view["body"])
         self.assertIn("Save Draft", view["body"])
         self.assertIn("Submit Application", view["body"])
@@ -805,10 +831,10 @@ class AppTests(unittest.TestCase):
             call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
-        self.assertIn("Forms and Applications", dashboard["body"])
+        self.assertIn("ICHRA Setup Workspace", dashboard["body"])
 
         workspace = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=employer_cookie)
-        self.assertIn("ICHRA Setup Application Workspace", workspace["body"])
+        self.assertIn("ICHRA Setup Workspace", workspace["body"])
         self.assertNotIn("New Employer Setup Form", workspace["body"])
 
     def test_employer_applications_link_to_workspace(self):
@@ -844,6 +870,14 @@ class AppTests(unittest.TestCase):
         self.assertIn("Team Administration", view["body"])
         self.assertIn("/teams/create", view["body"])
         self.assertIn("/teams/assign-admin", view["body"])
+
+    def test_team_administration_shows_active_team_table_and_member_modal_trigger(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
+        self.assertIn("Active Team", view["body"])
+        self.assertIn("View members", view["body"])
+        self.assertIn("team-members-", view["body"])
 
     def test_admin_can_send_notification_to_super_admin(self):
         admin_cookie = ""
