@@ -351,6 +351,32 @@ class AppTests(unittest.TestCase):
         self.assertIn("Broker Client", dashboard["body"])
         self.assertIn("broker2", dashboard["body"])
 
+
+    def test_employer_application_status_shows_not_started_before_ichra(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Status+Co&contact_name=Sky&work_email=sky%40status.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fstatus.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+
+        dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=cookie)
+        self.assertIn("Not started", dashboard["body"])
+
+    def test_invalid_view_falls_back_to_dashboard(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=doesnotexist", cookie_header=cookie)
+        self.assertIn("Workflow Snapshot", view["body"])
+        self.assertIn("Welcome, Alex", view["body"])
+
     def test_team_tab_exists_and_contains_user_management(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
