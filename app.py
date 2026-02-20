@@ -449,6 +449,19 @@ class TaskTrackerApp:
         db.close()
         return rows
 
+    def get_users_for_account_management(self):
+        db = self.db()
+        rows = db.execute(
+            """
+            SELECT id, username, role, is_active, team_id
+            FROM users
+            WHERE role != 'super_admin'
+            ORDER BY is_active DESC, username ASC
+            """
+        ).fetchall()
+        db.close()
+        return rows
+
     def get_login_demo_accounts(self):
         db = self.db()
         rows = db.execute(
@@ -1333,11 +1346,11 @@ class TaskTrackerApp:
             nav_links.insert(1, ("application", "Setup Applications"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
-        nav_links.append(("devlog", "Dev Log"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
         if show_logs:
             nav_links.append(("logs", "Activity Log"))
+        nav_links.append(("devlog", "Dev Log"))
 
         nav_html = "".join(
             f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
@@ -1377,11 +1390,13 @@ class TaskTrackerApp:
 
         broker_admin_section = ""
         if role in {"super_admin", "admin", "broker"}:
-            users_for_admin = [row for row in rows if row["role"] != "super_admin"]
+            users_for_admin = self.get_users_for_account_management() if role == "super_admin" else [row for row in rows if row["role"] != "super_admin"]
             if role == "admin":
                 users_for_admin = [row for row in users_for_admin if row["team_id"] == user["team_id"] and row["role"] in {"admin", "broker"}]
             elif role == "broker":
                 users_for_admin = [row for row in users_for_admin if row["id"] == user["id"]]
+
+            user_settings_modals = ""
             user_rows = "".join(
                 f"""
                 <tr>
@@ -1389,23 +1404,44 @@ class TaskTrackerApp:
                   <td>{html.escape(row['role'])}</td>
                   <td>{'Active' if row['is_active'] else 'Deactivated'}</td>
                   <td>
-                    <form method='post' action='/admin/users/update' class='inline-form'>
-                      <input type='hidden' name='user_id' value='{row['id']}' />
-                      <input name='username' value='{html.escape(row['username'])}' required minlength='3' />
-                      <select name='role'>
-                        <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
-                        <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
-                        <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
-                      </select>
-                      <select name='is_active'>
-                        <option value='1' {'selected' if row['is_active'] else ''}>active</option>
-                        <option value='0' {'selected' if not row['is_active'] else ''}>deactivated</option>
-                      </select>
-                      <input name='password' type='password' placeholder='new password (optional)' />
-                      <button type='submit' class='secondary'>Save</button>
-                    </form>
+                    <button type='button' class='table-link as-button' data-modal-open='user-settings-{row['id']}'>Open settings</button>
                   </td>
                 </tr>
+                """
+                for row in users_for_admin
+            )
+            user_settings_modals = "".join(
+                f"""
+                <div class='modal' id='user-settings-{row['id']}' aria-hidden='true'>
+                  <div class='modal-backdrop' data-modal-close='user-settings-{row['id']}'></div>
+                  <section class='modal-card card'>
+                    <button type='button' class='modal-close' aria-label='Close' data-modal-close='user-settings-{row['id']}'>×</button>
+                    <h3>User Settings · {html.escape(row['username'])}</h3>
+                    <form method='post' action='/admin/users/update' class='form-grid'>
+                      <input type='hidden' name='user_id' value='{row['id']}' />
+                      <label>Username
+                        <input name='username' value='{html.escape(row['username'])}' required minlength='3' />
+                      </label>
+                      <label>Role
+                        <select name='role'>
+                          <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
+                          <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
+                          <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
+                        </select>
+                      </label>
+                      <label>Status
+                        <select name='is_active'>
+                          <option value='1' {'selected' if row['is_active'] else ''}>active</option>
+                          <option value='0' {'selected' if not row['is_active'] else ''}>deactivated</option>
+                        </select>
+                      </label>
+                      <label>New Password
+                        <input name='password' type='password' placeholder='optional password reset' />
+                      </label>
+                      <button type='submit' class='secondary'>Save</button>
+                    </form>
+                  </section>
+                </div>
                 """
                 for row in users_for_admin
             )
@@ -1423,6 +1459,7 @@ class TaskTrackerApp:
                   <tbody>{user_rows}</tbody>
                 </table></div>
               </section>
+              {user_settings_modals}
             """
 
         settings_section = "<section class='section-block'><p class='subtitle'>This account has no editable settings.</p></section>"
