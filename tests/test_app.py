@@ -431,11 +431,11 @@ class AppTests(unittest.TestCase):
             call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
-        self.assertIn("Continue ICHRA Artifact", dashboard["body"])
+        self.assertIn("Continue ICHRA Application", dashboard["body"])
         notifications = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=employer_cookie)
         self.assertIn("ready and waiting for you to finish", notifications["body"])
 
-    def test_employer_can_submit_ichra_artifact(self):
+    def test_employer_can_submit_ichra_application(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
         call_app(
@@ -505,7 +505,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("Open New Employer Setup", login_page["body"])
         self.assertIn("new-employer-modal", login_page["body"])
 
-    def test_application_view_renders_artifact_workspace(self):
+    def test_application_view_renders_application_workspace(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         cookie = merge_cookies(cookie, login["headers"])
@@ -521,10 +521,10 @@ class AppTests(unittest.TestCase):
         )
 
         view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
-        self.assertIn("ICHRA Setup Artifact Workspace", view["body"])
-        self.assertIn("Switch employer artifact", view["body"])
+        self.assertIn("ICHRA Setup Application Workspace", view["body"])
+        self.assertIn("Switch employer application", view["body"])
         self.assertIn("Save Draft", view["body"])
-        self.assertIn("Submit Artifact", view["body"])
+        self.assertIn("Submit Application", view["body"])
 
     def test_public_signup_creates_employer_request(self):
         response = call_app(
@@ -722,7 +722,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("Clear Filters", logs_view["body"])
 
 
-    def test_employer_applications_open_in_modal(self):
+    def test_employer_applications_link_to_workspace(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
         call_app(
@@ -745,7 +745,8 @@ class AppTests(unittest.TestCase):
             call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
         )
         view = call_app(self.app, method="GET", path="/", query_string="view=applications", cookie_header=employer_cookie)
-        self.assertIn("data-modal-open='ichra-application-modal'", view["body"])
+        self.assertIn("/?view=application&employer_id=", view["body"])
+        self.assertIn("/db/ichra_applications", view["body"])
 
     def test_super_admin_team_management_forms_present(self):
         cookie = ""
