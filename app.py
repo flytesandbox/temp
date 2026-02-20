@@ -131,6 +131,32 @@ class TaskTrackerApp:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
 
+            CREATE TABLE IF NOT EXISTS ichra_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employer_id INTEGER NOT NULL UNIQUE,
+                desired_start_date TEXT NOT NULL DEFAULT '',
+                service_type TEXT NOT NULL DEFAULT '',
+                primary_first_name TEXT NOT NULL DEFAULT '',
+                primary_last_name TEXT NOT NULL DEFAULT '',
+                primary_email TEXT NOT NULL DEFAULT '',
+                primary_phone TEXT NOT NULL DEFAULT '',
+                legal_name TEXT NOT NULL DEFAULT '',
+                nature_of_business TEXT NOT NULL DEFAULT '',
+                total_employee_count TEXT NOT NULL DEFAULT '',
+                physical_state TEXT NOT NULL DEFAULT '',
+                reimbursement_option TEXT NOT NULL DEFAULT '',
+                employee_class_assistance TEXT NOT NULL DEFAULT '',
+                planned_contribution TEXT NOT NULL DEFAULT '',
+                claim_option TEXT NOT NULL DEFAULT '',
+                agent_support TEXT NOT NULL DEFAULT '',
+                artifact_status TEXT NOT NULL DEFAULT 'draft',
+                last_saved_by_user_id INTEGER,
+                submitted_at TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (employer_id) REFERENCES employers(id)
+            );
+
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -257,6 +283,38 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE employers ADD COLUMN broker_user_id INTEGER")
         if "primary_user_id" not in employer_columns:
             db.execute("ALTER TABLE employers ADD COLUMN primary_user_id INTEGER")
+
+        ichra_columns = {row[1] for row in db.execute("PRAGMA table_info(ichra_applications)").fetchall()}
+        if not ichra_columns:
+            db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS ichra_applications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    employer_id INTEGER NOT NULL UNIQUE,
+                    desired_start_date TEXT NOT NULL DEFAULT '',
+                    service_type TEXT NOT NULL DEFAULT '',
+                    primary_first_name TEXT NOT NULL DEFAULT '',
+                    primary_last_name TEXT NOT NULL DEFAULT '',
+                    primary_email TEXT NOT NULL DEFAULT '',
+                    primary_phone TEXT NOT NULL DEFAULT '',
+                    legal_name TEXT NOT NULL DEFAULT '',
+                    nature_of_business TEXT NOT NULL DEFAULT '',
+                    total_employee_count TEXT NOT NULL DEFAULT '',
+                    physical_state TEXT NOT NULL DEFAULT '',
+                    reimbursement_option TEXT NOT NULL DEFAULT '',
+                    employee_class_assistance TEXT NOT NULL DEFAULT '',
+                    planned_contribution TEXT NOT NULL DEFAULT '',
+                    claim_option TEXT NOT NULL DEFAULT '',
+                    agent_support TEXT NOT NULL DEFAULT '',
+                    artifact_status TEXT NOT NULL DEFAULT 'draft',
+                    last_saved_by_user_id INTEGER,
+                    submitted_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (employer_id) REFERENCES employers(id)
+                )
+                """
+            )
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -340,15 +398,14 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/login")
             if session_user["role"] != "employer":
                 return self.redirect(start_response, "/", flash=("error", "Only employer accounts can start ICHRA setup."))
-            employer_before = self.list_visible_employers(session_user)
-            was_started = bool(employer_before and employer_before[0]["ichra_started"])
             self.start_employer_ichra(session_user["id"])
-            if was_started:
-                self.complete_employer_application(session_user["id"])
-                self.log_action(session_user["id"], "application_status_changed", "employer", session_user["id"], session_user["username"], "status=complete")
-                return self.redirect(start_response, "/?view=applications", flash=("success", "Application marked complete."))
             self.log_action(session_user["id"], "ichra_started", "employer", session_user["id"], session_user["username"], "Employer started ICHRA setup")
-            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application started."))
+            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application opened. Complete and submit the artifact when ready."))
+
+        if path == "/applications/ichra/save" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_save_ichra_application(start_response, session_user, self.parse_form(environ))
 
         if path == "/employers/refer" and method == "POST":
             if not session_user:
@@ -817,18 +874,88 @@ class TaskTrackerApp:
         db.commit()
         db.close()
 
-    def start_employer_ichra(self, employer_user_id: int):
+    def upsert_ichra_application(self, employer_id: int, payload: dict[str, str], actor_user_id: int, submit: bool = False):
         db = self.db()
-        employer = db.execute("SELECT ichra_started FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
-        if not employer:
-            db.close()
-            return
-        if employer["ichra_started"]:
-            db.execute("UPDATE employers SET application_complete = 1 WHERE linked_user_id = ?", (employer_user_id,))
-        else:
-            db.execute("UPDATE employers SET ichra_started = 1 WHERE linked_user_id = ?", (employer_user_id,))
+        status_value = "submitted" if submit else "draft"
+        db.execute(
+            """
+            INSERT INTO ichra_applications (
+                employer_id, desired_start_date, service_type, primary_first_name, primary_last_name,
+                primary_email, primary_phone, legal_name, nature_of_business, total_employee_count,
+                physical_state, reimbursement_option, employee_class_assistance, planned_contribution,
+                claim_option, agent_support, artifact_status, last_saved_by_user_id, submitted_at,
+                updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)
+            ON CONFLICT(employer_id) DO UPDATE SET
+                desired_start_date = excluded.desired_start_date,
+                service_type = excluded.service_type,
+                primary_first_name = excluded.primary_first_name,
+                primary_last_name = excluded.primary_last_name,
+                primary_email = excluded.primary_email,
+                primary_phone = excluded.primary_phone,
+                legal_name = excluded.legal_name,
+                nature_of_business = excluded.nature_of_business,
+                total_employee_count = excluded.total_employee_count,
+                physical_state = excluded.physical_state,
+                reimbursement_option = excluded.reimbursement_option,
+                employee_class_assistance = excluded.employee_class_assistance,
+                planned_contribution = excluded.planned_contribution,
+                claim_option = excluded.claim_option,
+                agent_support = excluded.agent_support,
+                artifact_status = excluded.artifact_status,
+                last_saved_by_user_id = excluded.last_saved_by_user_id,
+                submitted_at = CASE WHEN excluded.artifact_status = 'submitted' THEN CURRENT_TIMESTAMP ELSE ichra_applications.submitted_at END,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                employer_id,
+                payload.get("desired_start_date", ""),
+                payload.get("service_type", ""),
+                payload.get("primary_first_name", ""),
+                payload.get("primary_last_name", ""),
+                payload.get("primary_email", ""),
+                payload.get("primary_phone", ""),
+                payload.get("legal_name", ""),
+                payload.get("nature_of_business", ""),
+                payload.get("total_employee_count", ""),
+                payload.get("physical_state", ""),
+                payload.get("reimbursement_option", ""),
+                payload.get("employee_class_assistance", ""),
+                payload.get("planned_contribution", ""),
+                payload.get("claim_option", ""),
+                payload.get("agent_support", ""),
+                status_value,
+                actor_user_id,
+                1 if submit else 0,
+            ),
+        )
+        db.execute(
+            "UPDATE employers SET ichra_started = 1, application_complete = ? WHERE id = ?",
+            (1 if submit else 0, employer_id),
+        )
         db.commit()
         db.close()
+
+    def get_ichra_application(self, employer_id: int):
+        db = self.db()
+        row = db.execute("SELECT * FROM ichra_applications WHERE employer_id = ?", (employer_id,)).fetchone()
+        db.close()
+        return row
+
+    def start_employer_ichra(self, employer_user_id: int):
+        db = self.db()
+        employer = db.execute("SELECT id FROM employers WHERE linked_user_id = ?", (employer_user_id,)).fetchone()
+        if not employer:
+            db.close()
+            return None
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = 0 WHERE linked_user_id = ?", (employer_user_id,))
+        db.execute(
+            "INSERT OR IGNORE INTO ichra_applications (employer_id, artifact_status, last_saved_by_user_id) VALUES (?, 'draft', ?)",
+            (employer["id"], employer_user_id),
+        )
+        db.commit()
+        db.close()
+        return employer["id"]
 
     def refer_client_ichra(self, employer_id: int):
         db = self.db()
@@ -836,7 +963,11 @@ class TaskTrackerApp:
         if not employer:
             db.close()
             return None
-        db.execute("UPDATE employers SET ichra_started = 1 WHERE id = ?", (employer_id,))
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = 0 WHERE id = ?", (employer_id,))
+        db.execute(
+            "INSERT OR IGNORE INTO ichra_applications (employer_id, artifact_status, last_saved_by_user_id) VALUES (?, 'draft', ?)",
+            (employer_id, employer["linked_user_id"]),
+        )
         db.commit()
         db.close()
         return employer
@@ -1146,14 +1277,29 @@ class TaskTrackerApp:
             employer = self.get_visible_employer_by_id(session_user, existing_employer_id)
             if not employer:
                 return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
-            self.start_employer_ichra(employer["linked_user_id"])
-            self.set_employer_application_in_progress(employer["linked_user_id"])
-            self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup application submitted")
-            self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup application submitted.")
+            self.upsert_ichra_application(existing_employer_id, {
+                "desired_start_date": form.get("ichra_start_date", "").strip(),
+                "service_type": form.get("service_type", "").strip(),
+                "primary_first_name": form.get("primary_first_name", "").strip(),
+                "primary_last_name": form.get("primary_last_name", "").strip(),
+                "primary_email": form.get("primary_email", "").strip(),
+                "primary_phone": form.get("primary_phone", "").strip(),
+                "legal_name": form.get("legal_name", "").strip(),
+                "nature_of_business": form.get("nature_of_business", "").strip(),
+                "total_employee_count": form.get("total_employee_count", "").strip(),
+                "physical_state": form.get("physical_state", "").strip(),
+                "reimbursement_option": form.get("reimbursement_option", "").strip(),
+                "employee_class_assistance": form.get("employee_class_assistance", "").strip(),
+                "planned_contribution": form.get("planned_contribution", "").strip(),
+                "claim_option": form.get("claim_option", "").strip(),
+                "agent_support": form.get("agent_support", "").strip(),
+            }, actor_user_id=session_user["id"], submit=False)
+            self.log_action(session_user["id"], "employer_updated", "employer", employer["id"], employer["legal_name"], "ICHRA setup artifact initialized")
+            self.create_notification(session_user["id"], f"{employer['legal_name']} ICHRA setup artifact initialized.")
             return self.redirect(
                 start_response,
-                "/?view=employers",
-                flash=("success", f"ICHRA setup submitted for {employer['legal_name']}.")
+                f"/?view=application&employer_id={existing_employer_id}",
+                flash=("success", f"ICHRA setup artifact started for {employer['legal_name']}. Continue editing before submission.")
             )
 
         if not form.get("contact_name", "").strip():
@@ -1180,6 +1326,45 @@ class TaskTrackerApp:
             "/?view=employers",
             flash=("success", f"Employer created from Employer Setup Form. Portal username: {username}, temporary password: user"),
         )
+
+    def handle_save_ichra_application(self, start_response, session_user, form):
+        try:
+            employer_id = int(form.get("employer_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=application", flash=("error", "Select an employer before saving the ICHRA artifact."))
+
+        employer = self.get_visible_employer_by_id(session_user, employer_id)
+        if not employer:
+            return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
+
+        if session_user["role"] == "employer" and employer["linked_user_id"] != session_user["id"]:
+            return self.redirect(start_response, "/?view=application", flash=("error", "You can only edit your own employer artifact."))
+
+        required_fields = [
+            "desired_start_date", "service_type", "primary_first_name", "primary_last_name", "primary_email",
+            "primary_phone", "legal_name", "nature_of_business", "total_employee_count", "physical_state",
+            "reimbursement_option", "employee_class_assistance", "planned_contribution", "claim_option", "agent_support",
+        ]
+        payload = {key: form.get(key, "").strip() for key in required_fields}
+        action = form.get("artifact_action", "save")
+        submit = action == "submit"
+
+        if submit and any(not payload[field] for field in required_fields):
+            return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=("error", "Complete all required ICHRA artifact fields before submitting."))
+
+        self.upsert_ichra_application(employer_id, payload, actor_user_id=session_user["id"], submit=submit)
+        if submit:
+            self.log_action(session_user["id"], "application_status_changed", "employer", employer_id, employer["legal_name"], "status=complete;artifact=ichra")
+            if employer["primary_user_id"]:
+                self.create_notification(employer["primary_user_id"], f"ICHRA setup artifact submitted for {employer['legal_name']}.")
+            self.create_notification(session_user["id"], f"ICHRA setup artifact submitted for {employer['legal_name']}.")
+            flash = ("success", f"ICHRA setup artifact submitted for {employer['legal_name']}.")
+        else:
+            self.log_action(session_user["id"], "employer_updated", "employer", employer_id, employer["legal_name"], "Saved ICHRA setup artifact draft")
+            flash = ("success", f"Draft saved for {employer['legal_name']}.")
+
+        target_view = "applications" if session_user["role"] == "employer" else "application"
+        return self.redirect(start_response, f"/?view={target_view}&employer_id={employer_id}", flash=flash)
 
     def handle_broker_refer_client(self, start_response, session_user, form):
         try:
@@ -1741,7 +1926,7 @@ class TaskTrackerApp:
                     <thead><tr><th>Application</th><th>Status</th><th>Open</th></tr></thead>
                     <tbody>
                       <tr><td>Initial Employer Setup</td><td>Submitted</td><td><a class='table-link' href='/?view=employers'>Open</a></td></tr>
-                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td><button type='button' class='table-link as-button' data-modal-open='ichra-application-modal'>Open</button></td></tr>
+                      <tr><td>ICHRA Setup Application</td><td>{ichra_status}</td><td><button type='button' class='table-link as-button' data-modal-open='ichra-application-modal'>Open Artifact</button></td></tr>
                     </tbody>
                   </table></div>
                 </section>
@@ -1749,27 +1934,23 @@ class TaskTrackerApp:
             employer_application_modal = f"""
                 <div class='modal' id='ichra-application-modal' aria-hidden='true'>
                   <div class='modal-backdrop' data-modal-close='ichra-application-modal'></div>
-                  <section class='modal-card card'>
+                  <section class='modal-card card artifact-modal'>
                     <button type='button' class='modal-close' aria-label='Close' data-modal-close='ichra-application-modal'>×</button>
-                    <h3>ICHRA Setup Application</h3>
-                    <p class='subtitle'>Status: {ichra_status}. Use the button below to continue your ICHRA workflow.</p>
-                    <form method='post' action='/employers/start-ichra' class='form-grid'>
-                      <button type='submit'>{'Complete ICHRA Setup Application' if employer_profile['ichra_started'] else 'Start ICHRA Setup Application'}</button>
-                    </form>
+                    {self.render_ichra_application_form(user, selected_employer_id=employer_profile['id'])}
                   </section>
                 </div>
             """
 
             if not employer_profile["ichra_started"]:
                 header_primary_cta = """
-                    <button type='button' data-modal-open='ichra-application-modal'>Open ICHRA Setup</button>
+                    <button type='button' data-modal-open='ichra-application-modal'>Start ICHRA Artifact</button>
                 """
             elif not employer_profile["application_complete"]:
                 header_primary_cta = """
-                    <button type='button' class='nav-link active as-button' data-modal-open='ichra-application-modal'>Finish ICHRA Setup Application</button>
+                    <button type='button' class='nav-link active as-button' data-modal-open='ichra-application-modal'>Continue ICHRA Artifact</button>
                 """
             else:
-                header_primary_cta = "<span class='nav-link active'>Application Complete</span>"
+                header_primary_cta = "<span class='nav-link active'>Artifact Submitted</span>"
         if role == "broker":
             header_primary_cta = "<a class='nav-link active' href='/?view=dashboard'>Refer a Client</a>"
 
@@ -1846,10 +2027,16 @@ class TaskTrackerApp:
             {employer_workspace}
         """
 
+        selected_employer_id = None
+        try:
+            selected_employer_id = int(query.get("employer_id", [""])[0]) if query.get("employer_id") else None
+        except ValueError:
+            selected_employer_id = None
+
         panel_lookup = {
             "dashboard": dashboard_panel,
             "team": team_panel,
-            "application": self.render_ichra_application_form(user) if show_application else "",
+            "application": self.render_ichra_application_form(user, selected_employer_id=selected_employer_id) if show_application else "",
             "employers": employers_panel,
             "applications": employer_applications_panel if role == "employer" else employers_panel,
             "notifications": notifications_panel,
@@ -1887,72 +2074,103 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
-    def render_ichra_application_form(self, user):
+    def render_ichra_application_form(self, user, selected_employer_id: int | None = None):
         visible_employers = self.list_visible_employers(user)
+        if not visible_employers:
+            return """
+            <section class='section-block panel-card'>
+              <h3>ICHRA Setup Application Center</h3>
+              <p class='subtitle'>Create an employer first, then initialize and manage ICHRA artifacts from here.</p>
+            </section>
+            """
+
+        if selected_employer_id is None:
+            selected_employer_id = visible_employers[0]["id"]
+        selected_employer = next((row for row in visible_employers if row["id"] == selected_employer_id), visible_employers[0])
+        selected_employer_id = selected_employer["id"]
+
+        artifact = self.get_ichra_application(selected_employer_id)
+        artifact_defaults = {
+            "desired_start_date": "",
+            "service_type": "",
+            "primary_first_name": "",
+            "primary_last_name": "",
+            "primary_email": selected_employer["work_email"],
+            "primary_phone": selected_employer["phone"],
+            "legal_name": selected_employer["legal_name"],
+            "nature_of_business": selected_employer["industry"],
+            "total_employee_count": selected_employer["company_size"],
+            "physical_state": selected_employer["state"],
+            "reimbursement_option": "",
+            "employee_class_assistance": "",
+            "planned_contribution": "",
+            "claim_option": "",
+            "agent_support": "",
+        }
+        if artifact:
+            for key in artifact_defaults:
+                artifact_defaults[key] = artifact[key] if artifact[key] else artifact_defaults[key]
+
+        status_label = "Draft"
+        if selected_employer["application_complete"]:
+            status_label = "Submitted"
+        elif selected_employer["ichra_started"]:
+            status_label = "In progress"
+
         employer_options = "".join(
-            f"<option value='{row['id']}'>{html.escape(row['legal_name'])} ({html.escape(row['portal_username'])})</option>"
+            f"<option value='{row['id']}' {'selected' if row['id'] == selected_employer_id else ''}>{html.escape(row['legal_name'])} ({html.escape(row['portal_username'])})</option>"
             for row in visible_employers
         )
+
         return f"""
-        <section class='section-block panel-card'>
-          <h3>ICHRA Setup Application Center</h3>
-          <p class='subtitle'>Choose the workflow you want to launch.</p>
-          <div class='toggle-row'>
-            <button type='button' class='setup-toggle active' data-setup-mode='ichra'>ICHRA Application</button>
-            <button type='button' class='setup-toggle' data-setup-mode='basic'>Employer Setup Form</button>
+        <section class='section-block panel-card artifact-center'>
+          <h3>ICHRA Setup Artifact Workspace</h3>
+          <p class='subtitle'>Every ICHRA application is an employer-owned artifact. Start it once, save drafts anytime, and submit only when complete.</p>
+          <div class='artifact-meta-grid'>
+            <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
+            <article><h4>Artifact Status</h4><p>{status_label}</p></article>
+            <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
           </div>
 
-          <div class='setup-panel' data-panel-mode='ichra'>
-            <h4>ICHRA Application</h4>
-            <p class='subtitle'>This workflow must be mapped to an existing employer account.</p>
-            <form method='post' action='/employers/create' class='form-grid'>
-              <input type='hidden' name='setup_mode' value='ichra' />
-              <label>Desired ICHRA Start Date *<input type='date' name='ichra_start_date' required /></label>
-              <label>Existing Employer *
-                <select name='existing_employer_id' required>
-                  <option value=''>Select an active employer</option>
-                  {employer_options}
-                </select>
-              </label>
-              <label>Service Type *
-                <select name='service_type' required>
-                  <option value='ICHRA Documents + Monthly Administration'>ICHRA Documents + Monthly Administration</option>
-                  <option value='ICHRA Documents Only'>ICHRA Documents Only</option>
-                </select>
-              </label>
-              <label>Primary Contact First Name *<input name='primary_first_name' required /></label>
-              <label>Primary Contact Last Name *<input name='primary_last_name' required /></label>
-              <label>Primary Contact Email *<input type='email' name='primary_email' required /></label>
-              <label>Primary Contact Phone *<input name='primary_phone' required /></label>
-              <label>Legal Business Name *<input name='legal_name' required /></label>
-              <label>Nature of Business *<input name='nature_of_business' required /></label>
-              <label>Total Employee Count *<input type='number' name='total_employee_count' required /></label>
-              <label>Physical State *<input name='physical_state' required /></label>
-              <label>Reimbursement Option *<input name='reimbursement_option' required /></label>
-              <label>Employee Class Assistance *<input name='employee_class_assistance' required /></label>
-              <label>Planned Contribution *<input name='planned_contribution' required /></label>
-              <label>Claim Option *<input name='claim_option' required /></label>
-              <label>Agent Support *<input name='agent_support' required /></label>
-              <button type='submit'>Finalize and Submit ICHRA Application</button>
-            </form>
-          </div>
+          <form method='get' action='/' class='inline-form artifact-picker'>
+            <input type='hidden' name='view' value='application' />
+            <label>Switch employer artifact
+              <select name='employer_id'>{employer_options}</select>
+            </label>
+            <button type='submit' class='secondary'>Load Artifact</button>
+          </form>
 
-          <div class='setup-panel' data-panel-mode='basic' hidden>
-            <h4>Employer Setup Form</h4>
-            <p class='subtitle'>Use this for standard employer setup without the full ICHRA workflow.</p>
-            <form method='post' action='/employers/create' class='form-grid'>
-              <input type='hidden' name='setup_mode' value='basic' />
-              <label>Employer Legal Name *<input name='legal_name' required /></label>
-              <label>Primary Contact Name *<input name='contact_name' required /></label>
-              <label>Work Email *<input type='email' name='work_email' required /></label>
-              <label>Phone *<input name='phone' required /></label>
-              <label>Company Size *<input name='company_size' required /></label>
-              <label>Industry *<input name='industry' required /></label>
-              <label>Website *<input name='website' required /></label>
-              <label>State *<input name='state' required /></label>
-              <button type='submit'>Submit Employer Setup Form</button>
-            </form>
-          </div>
+          <form method='post' action='/applications/ichra/save' class='form-grid artifact-form'>
+            <input type='hidden' name='employer_id' value='{selected_employer_id}' />
+            <h4>Plan & Contact</h4>
+            <label>Desired ICHRA Start Date *<input type='date' name='desired_start_date' value='{html.escape(artifact_defaults['desired_start_date'])}' required /></label>
+            <label>Service Type *
+              <select name='service_type' required>
+                <option value=''>Select service type</option>
+                <option value='ICHRA Documents + Monthly Administration' {'selected' if artifact_defaults['service_type'] == 'ICHRA Documents + Monthly Administration' else ''}>ICHRA Documents + Monthly Administration</option>
+                <option value='ICHRA Documents Only' {'selected' if artifact_defaults['service_type'] == 'ICHRA Documents Only' else ''}>ICHRA Documents Only</option>
+              </select>
+            </label>
+            <label>Primary Contact First Name *<input name='primary_first_name' value='{html.escape(artifact_defaults['primary_first_name'])}' required /></label>
+            <label>Primary Contact Last Name *<input name='primary_last_name' value='{html.escape(artifact_defaults['primary_last_name'])}' required /></label>
+            <label>Primary Contact Email *<input type='email' name='primary_email' value='{html.escape(artifact_defaults['primary_email'])}' required /></label>
+            <label>Primary Contact Phone *<input name='primary_phone' value='{html.escape(artifact_defaults['primary_phone'])}' required /></label>
+
+            <h4>Employer Profile Inputs</h4>
+            <label>Legal Business Name *<input name='legal_name' value='{html.escape(artifact_defaults['legal_name'])}' required /></label>
+            <label>Nature of Business *<input name='nature_of_business' value='{html.escape(artifact_defaults['nature_of_business'])}' required /></label>
+            <label>Total Employee Count *<input name='total_employee_count' value='{html.escape(artifact_defaults['total_employee_count'])}' required /></label>
+            <label>Physical State *<input name='physical_state' value='{html.escape(artifact_defaults['physical_state'])}' required /></label>
+            <label>Reimbursement Option *<input name='reimbursement_option' value='{html.escape(artifact_defaults['reimbursement_option'])}' required /></label>
+            <label>Employee Class Assistance *<input name='employee_class_assistance' value='{html.escape(artifact_defaults['employee_class_assistance'])}' required /></label>
+            <label>Planned Contribution *<input name='planned_contribution' value='{html.escape(artifact_defaults['planned_contribution'])}' required /></label>
+            <label>Claim Option *<input name='claim_option' value='{html.escape(artifact_defaults['claim_option'])}' required /></label>
+            <label>Agent Support *<input name='agent_support' value='{html.escape(artifact_defaults['agent_support'])}' required /></label>
+            <div class='artifact-actions'>
+              <button type='submit' name='artifact_action' value='save' class='secondary'>Save Draft</button>
+              <button type='submit' name='artifact_action' value='submit'>Submit Artifact</button>
+            </div>
+          </form>
         </section>
         """
 
