@@ -778,5 +778,84 @@ class AppTests(unittest.TestCase):
         notification_view = call_app(self.app, method="GET", path="/", query_string="view=notifications", cookie_header=super_cookie)
         self.assertNotIn("hiddenbroker (broker)", notification_view["body"])
 
+    def test_team_scoping_limits_admin_visibility_in_team_views(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        create_team = call_app(
+            self.app,
+            method="POST",
+            path="/teams/create",
+            body="name=West+Ops",
+            cookie_header=super_cookie,
+        )
+        self.assertEqual(dict(create_team["headers"]).get("Location"), "/?view=team")
+
+        db = self.app.db()
+        west_team = db.execute("SELECT id FROM teams WHERE name='West Ops'").fetchone()
+        alex = db.execute("SELECT id FROM users WHERE username='alex'").fetchone()
+        db.close()
+
+        assign = call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-admin",
+            body=f"admin_user_id={alex['id']}&team_id={west_team['id']}",
+            cookie_header=super_cookie,
+        )
+        self.assertEqual(dict(assign["headers"]).get("Location"), "/?view=team")
+
+        sam_cookie = ""
+        sam_cookie = merge_cookies(sam_cookie, call_app(self.app, method="POST", path="/login", body="username=sam&password=user")["headers"])
+        sam_team = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=completion", cookie_header=sam_cookie)
+        self.assertNotIn("alex", sam_team["body"])
+
+        alex_cookie = ""
+        alex_cookie = merge_cookies(alex_cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        alex_team = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=completion", cookie_header=alex_cookie)
+        self.assertIn("alex", alex_team["body"])
+        self.assertNotIn("sam", alex_team["body"])
+
+    def test_super_admin_can_assign_any_user_to_team_with_sub_group_tool(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=subbroker&password=user&role=broker",
+            cookie_header=super_cookie,
+        )
+
+        db = self.app.db()
+        subbroker = db.execute("SELECT id FROM users WHERE username='subbroker'").fetchone()
+        db.close()
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/teams/create",
+            body="name=East+Ops",
+            cookie_header=super_cookie,
+        )
+        db = self.app.db()
+        east_team = db.execute("SELECT id FROM teams WHERE name='East Ops'").fetchone()
+        db.close()
+
+        move = call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-user",
+            body=f"user_id={subbroker['id']}&team_id={east_team['id']}",
+            cookie_header=super_cookie,
+        )
+        self.assertEqual(dict(move["headers"]).get("Location"), "/?view=team")
+
+        db = self.app.db()
+        moved = db.execute("SELECT team_id FROM users WHERE id=?", (subbroker["id"],)).fetchone()
+        db.close()
+        self.assertEqual(moved["team_id"], east_team["id"])
+
 if __name__ == "__main__":
     unittest.main()
