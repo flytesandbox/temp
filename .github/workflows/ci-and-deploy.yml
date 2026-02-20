@@ -146,9 +146,9 @@ jobs:
 
           if ! ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo systemctl is-active --quiet '$SERVICE_NAME'"; then
             echo "Service failed to restart or is not active: $SERVICE_NAME" >&2
-            ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo systemctl status '$SERVICE_NAME' --no-pager -l || true"
-            ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo journalctl -u '$SERVICE_NAME' -n 200 --no-pager || true"
+            ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo systemctl status '$SERVICE_NAME' --no-pager || true"
+            ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo journalctl -u '$SERVICE_NAME' -n 120 --no-pager || true"
             exit 1
           fi
 
-          ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo systemctl status '$SERVICE_NAME' --no-pager -l"
+          ssh -p "$DEPLOY_PORT" "$REMOTE" "sudo systemctl status '$SERVICE_NAME' --no-pager"
