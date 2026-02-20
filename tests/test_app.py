@@ -735,6 +735,37 @@ class AppTests(unittest.TestCase):
         self.assertIn("Clear Filters", logs_view["body"])
 
 
+
+    def test_employer_can_access_forms_and_applications_workspace(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Workspace+Co&contact_name=Will&work_email=will%40workspace.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fworkspace.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role='employer' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=employer_cookie)
+        self.assertIn("Forms and Applications", dashboard["body"])
+
+        workspace = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=employer_cookie)
+        self.assertIn("ICHRA Setup Application Workspace", workspace["body"])
+        self.assertNotIn("New Employer Setup Form", workspace["body"])
+
     def test_employer_applications_link_to_workspace(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
