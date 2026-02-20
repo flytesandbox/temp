@@ -18,6 +18,14 @@ ALLOWED_DENSITIES = {"comfortable", "compact"}
 ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 
 
+def application_status_label(ichra_started: int, application_complete: int) -> str:
+    if application_complete:
+        return "Complete"
+    if ichra_started:
+        return "In progress"
+    return "Not started"
+
+
 def db_connect(db_path: str):
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -1413,7 +1421,7 @@ class TaskTrackerApp:
               <td>{html.escape(row['work_email'])}</td>
               <td>{html.escape(row['portal_username'])}</td>
               <td>{html.escape(row['broker_username'] or 'Unassigned')}</td>
-              <td>{'Complete' if row['application_complete'] else 'In progress'}</td>
+              <td>{application_status_label(row['ichra_started'], row['application_complete'])}</td>
               <td>{html.escape(row['onboarding_task'])}</td>
               <td>{self.render_employer_settings_link(row, role)}</td>
             </tr>
@@ -1725,7 +1733,7 @@ class TaskTrackerApp:
         header_primary_cta = ""
         employer_application_modal = ""
         if role == "employer" and employer_profile:
-            ichra_status = "Complete" if employer_profile["application_complete"] else ("In progress" if employer_profile["ichra_started"] else "Not started")
+            ichra_status = application_status_label(employer_profile["ichra_started"], employer_profile["application_complete"])
             employer_applications_panel = f"""
                 <section class='section-block'>
                   <h3>Applications</h3>
@@ -1849,7 +1857,10 @@ class TaskTrackerApp:
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",
         }
-        active_panel = panel_lookup.get(active_view, dashboard_panel)
+        active_panel = panel_lookup.get(active_view, "")
+        if not active_panel:
+            active_view = "dashboard"
+            active_panel = dashboard_panel
 
         password_banner = ""
         if user["must_change_password"]:
