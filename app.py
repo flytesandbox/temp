@@ -20,7 +20,7 @@ ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 
 def application_status_label(ichra_started: int, application_complete: int) -> str:
     if application_complete:
-        return "Complete"
+        return "Submitted"
     if ichra_started:
         return "In progress"
     return "Not started"
@@ -151,7 +151,10 @@ class TaskTrackerApp:
                 claim_option TEXT NOT NULL DEFAULT '',
                 agent_support TEXT NOT NULL DEFAULT '',
                 artifact_status TEXT NOT NULL DEFAULT 'draft',
+                access_token_status TEXT NOT NULL DEFAULT 'active',
                 last_saved_by_user_id INTEGER,
+                token_renewed_by_user_id INTEGER,
+                token_renewed_at TEXT,
                 submitted_at TEXT,
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -308,7 +311,10 @@ class TaskTrackerApp:
                     claim_option TEXT NOT NULL DEFAULT '',
                     agent_support TEXT NOT NULL DEFAULT '',
                     artifact_status TEXT NOT NULL DEFAULT 'draft',
+                    access_token_status TEXT NOT NULL DEFAULT 'active',
                     last_saved_by_user_id INTEGER,
+                    token_renewed_by_user_id INTEGER,
+                    token_renewed_at TEXT,
                     submitted_at TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -316,6 +322,12 @@ class TaskTrackerApp:
                 )
                 """
             )
+        if "access_token_status" not in ichra_columns:
+            db.execute("ALTER TABLE ichra_applications ADD COLUMN access_token_status TEXT NOT NULL DEFAULT 'active'")
+        if "token_renewed_by_user_id" not in ichra_columns:
+            db.execute("ALTER TABLE ichra_applications ADD COLUMN token_renewed_by_user_id INTEGER")
+        if "token_renewed_at" not in ichra_columns:
+            db.execute("ALTER TABLE ichra_applications ADD COLUMN token_renewed_at TEXT")
         db.execute(
             """
             INSERT OR IGNORE INTO tasks (id, title, description)
@@ -401,12 +413,17 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/", flash=("error", "Only employer accounts can start ICHRA setup."))
             self.start_employer_ichra(session_user["id"])
             self.log_action(session_user["id"], "ichra_started", "employer", session_user["id"], session_user["username"], "Employer started ICHRA setup")
-            return self.redirect(start_response, "/?view=applications", flash=("success", "ICHRA setup application opened. Complete and submit the application when ready."))
+            return self.redirect(start_response, "/?view=application", flash=("success", "ICHRA setup application opened. Complete and submit the application when ready."))
 
         if path == "/applications/ichra/save" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
             return self.handle_save_ichra_application(start_response, session_user, self.parse_form(environ))
+
+        if path == "/applications/ichra/renew" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_renew_ichra_token(start_response, session_user, self.parse_form(environ))
 
         if path == "/employers/refer" and method == "POST":
             if not session_user:
@@ -878,15 +895,16 @@ class TaskTrackerApp:
     def upsert_ichra_application(self, employer_id: int, payload: dict[str, str], actor_user_id: int, submit: bool = False):
         db = self.db()
         status_value = "submitted" if submit else "draft"
+        token_status = "locked" if submit else "active"
         db.execute(
             """
             INSERT INTO ichra_applications (
                 employer_id, desired_start_date, service_type, primary_first_name, primary_last_name,
                 primary_email, primary_phone, legal_name, nature_of_business, total_employee_count,
                 physical_state, reimbursement_option, employee_class_assistance, planned_contribution,
-                claim_option, agent_support, artifact_status, last_saved_by_user_id, submitted_at,
+                claim_option, agent_support, artifact_status, access_token_status, last_saved_by_user_id, submitted_at,
                 updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, CURRENT_TIMESTAMP)
             ON CONFLICT(employer_id) DO UPDATE SET
                 desired_start_date = excluded.desired_start_date,
                 service_type = excluded.service_type,
@@ -904,6 +922,7 @@ class TaskTrackerApp:
                 claim_option = excluded.claim_option,
                 agent_support = excluded.agent_support,
                 artifact_status = excluded.artifact_status,
+                access_token_status = excluded.access_token_status,
                 last_saved_by_user_id = excluded.last_saved_by_user_id,
                 submitted_at = CASE WHEN excluded.artifact_status = 'submitted' THEN CURRENT_TIMESTAMP ELSE ichra_applications.submitted_at END,
                 updated_at = CURRENT_TIMESTAMP
@@ -926,6 +945,7 @@ class TaskTrackerApp:
                 payload.get("claim_option", ""),
                 payload.get("agent_support", ""),
                 status_value,
+                token_status,
                 actor_user_id,
                 1 if submit else 0,
             ),
@@ -942,6 +962,24 @@ class TaskTrackerApp:
         row = db.execute("SELECT * FROM ichra_applications WHERE employer_id = ?", (employer_id,)).fetchone()
         db.close()
         return row
+
+    def renew_ichra_access_token(self, employer_id: int, actor_user_id: int):
+        db = self.db()
+        db.execute(
+            """
+            UPDATE ichra_applications
+            SET access_token_status = 'active',
+                artifact_status = 'draft',
+                token_renewed_by_user_id = ?,
+                token_renewed_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE employer_id = ?
+            """,
+            (actor_user_id, employer_id),
+        )
+        db.execute("UPDATE employers SET ichra_started = 1, application_complete = 0 WHERE id = ?", (employer_id,))
+        db.commit()
+        db.close()
 
     def start_employer_ichra(self, employer_user_id: int):
         db = self.db()
@@ -1341,6 +1379,14 @@ class TaskTrackerApp:
         if session_user["role"] == "employer" and employer["linked_user_id"] != session_user["id"]:
             return self.redirect(start_response, "/?view=application", flash=("error", "You can only edit your own employer application."))
 
+        artifact = self.get_ichra_application(employer_id)
+        if artifact and artifact["access_token_status"] == "locked":
+            return self.redirect(
+                start_response,
+                f"/?view=application&employer_id={employer_id}",
+                flash=("error", "This ICHRA setup workspace is locked after submission. Ask an admin or broker to renew access."),
+            )
+
         required_fields = [
             "desired_start_date", "service_type", "primary_first_name", "primary_last_name", "primary_email",
             "primary_phone", "legal_name", "nature_of_business", "total_employee_count", "physical_state",
@@ -1364,8 +1410,27 @@ class TaskTrackerApp:
             self.log_action(session_user["id"], "employer_updated", "employer", employer_id, employer["legal_name"], "Saved ICHRA setup application draft")
             flash = ("success", f"Draft saved for {employer['legal_name']}.")
 
-        target_view = "applications" if session_user["role"] == "employer" else "application"
-        return self.redirect(start_response, f"/?view={target_view}&employer_id={employer_id}", flash=flash)
+        return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=flash)
+
+    def handle_renew_ichra_token(self, start_response, session_user, form):
+        if session_user["role"] not in {"super_admin", "admin", "broker"}:
+            return self.redirect(start_response, "/?view=application", flash=("error", "Only admins and brokers can renew workspace access tokens."))
+        try:
+            employer_id = int(form.get("employer_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=application", flash=("error", "Select an employer to renew."))
+        employer = self.get_visible_employer_by_id(session_user, employer_id)
+        if not employer:
+            return self.redirect(start_response, "/?view=application", flash=("error", "Employer not found in your access scope."))
+
+        artifact = self.get_ichra_application(employer_id)
+        if not artifact or artifact["access_token_status"] != "locked":
+            return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=("error", "This workspace is already active."))
+
+        self.renew_ichra_access_token(employer_id, session_user["id"])
+        self.log_action(session_user["id"], "application_status_changed", "employer", employer_id, employer["legal_name"], "status=open;application=ichra;token=renewed")
+        self.create_notification(employer["linked_user_id"], f"ICHRA setup workspace reopened for {employer['legal_name']}. You can now continue editing.")
+        return self.redirect(start_response, f"/?view=application&employer_id={employer_id}", flash=("success", f"ICHRA setup workspace reopened for {employer['legal_name']}."))
 
     def handle_broker_refer_client(self, start_response, session_user, form):
         try:
@@ -1641,8 +1706,6 @@ class TaskTrackerApp:
         nav_links = [("dashboard", "Dashboard")]
         if role in {"super_admin", "admin", "broker"}:
             nav_links.append(("employers", "Employers"))
-        if role == "employer":
-            nav_links.append(("applications", "Applications"))
         if show_application:
             nav_links.insert(1, ("application", "Forms and Applications"))
         nav_links.append(("team", "Team"))
@@ -1935,11 +1998,11 @@ class TaskTrackerApp:
 
             if not employer_profile["ichra_started"]:
                 header_primary_cta = """
-                    <a class='nav-link active' href='/?view=applications'>Start ICHRA Application</a>
+                    <a class='nav-link active' href='/?view=application'>Start ICHRA Application</a>
                 """
             elif not employer_profile["application_complete"]:
                 header_primary_cta = """
-                    <a class='nav-link active' href='/?view=applications'>Continue ICHRA Application</a>
+                    <a class='nav-link active' href='/?view=application'>Continue ICHRA Application</a>
                 """
             else:
                 header_primary_cta = "<span class='nav-link active'>Application Submitted</span>"
@@ -2122,6 +2185,10 @@ class TaskTrackerApp:
         selected_employer_id = selected_employer["id"]
 
         artifact = self.get_ichra_application(selected_employer_id)
+        if role == "employer" and (not artifact or not selected_employer["ichra_started"]):
+            self.start_employer_ichra(user["id"])
+            selected_employer = self.get_visible_employer_by_id(user, selected_employer_id) or selected_employer
+            artifact = self.get_ichra_application(selected_employer_id)
         artifact_defaults = {
             "desired_start_date": "",
             "service_type": "",
@@ -2143,11 +2210,22 @@ class TaskTrackerApp:
             for key in artifact_defaults:
                 artifact_defaults[key] = artifact[key] if artifact[key] else artifact_defaults[key]
 
-        status_label = "Draft"
+        status_label = "Open"
         if selected_employer["application_complete"]:
             status_label = "Submitted"
-        elif selected_employer["ichra_started"]:
-            status_label = "In progress"
+
+        token_status = (artifact["access_token_status"] if artifact and artifact["access_token_status"] else "active")
+        is_locked = token_status == "locked"
+        renew_block = ""
+        if is_locked and role in {"super_admin", "admin", "broker"}:
+            renew_block = f"""
+            <form method='post' action='/applications/ichra/renew' class='inline-form'>
+              <input type='hidden' name='employer_id' value='{selected_employer_id}' />
+              <button type='submit'>Renew Workspace Token</button>
+            </form>
+            """
+        elif is_locked:
+            renew_block = "<p class='subtitle'>Workspace token is locked after submission. Ask an admin or broker to reopen it.</p>"
 
         employer_options = "".join(
             f"<option value='{row['id']}' {'selected' if row['id'] == selected_employer_id else ''}>{html.escape(row['legal_name'])} ({html.escape(row['portal_username'])})</option>"
@@ -2161,8 +2239,10 @@ class TaskTrackerApp:
           <div class='artifact-meta-grid'>
             <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
             <article><h4>Application Status</h4><p>{status_label}</p></article>
+            <article><h4>Access Token</h4><p>{'Locked' if is_locked else 'Active'}</p></article>
             <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
           </div>
+          {renew_block}
 
           <form method='get' action='/' class='inline-form artifact-picker'>
             <input type='hidden' name='view' value='application' />
@@ -2174,6 +2254,7 @@ class TaskTrackerApp:
 
           <form method='post' action='/applications/ichra/save' class='form-grid artifact-form'>
             <input type='hidden' name='employer_id' value='{selected_employer_id}' />
+            <fieldset {'disabled' if is_locked else ''}>
             <h4>Plan & Contact</h4>
             <label>Desired ICHRA Start Date *<input type='date' name='desired_start_date' value='{html.escape(artifact_defaults['desired_start_date'])}' required /></label>
             <label>Service Type *
@@ -2202,6 +2283,7 @@ class TaskTrackerApp:
               <button type='submit' name='artifact_action' value='save' class='secondary'>Save Draft</button>
               <button type='submit' name='artifact_action' value='submit'>Submit Application</button>
             </div>
+            </fieldset>
           </form>
         </section>
         """
