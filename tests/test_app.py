@@ -678,6 +678,54 @@ class AppTests(unittest.TestCase):
         self.assertIn("/teams/create", view["body"])
         self.assertIn("/teams/assign-admin", view["body"])
 
+    def test_super_admin_operation_subnav_views_present(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        status_view = call_app(self.app, method="GET", path="/", query_string="view=team-status", cookie_header=cookie)
+        self.assertIn("Admin Operation Dashboard", status_view["body"])
+        self.assertIn("Team Completion Status", status_view["body"])
+        self.assertIn("dashboard-subnav", status_view["body"])
+
+        team_admin_view = call_app(self.app, method="GET", path="/", query_string="view=team-admin", cookie_header=cookie)
+        self.assertIn("Team Administration", team_admin_view["body"])
+        self.assertIn("/teams/create", team_admin_view["body"])
+
+    def test_account_admin_modify_opens_modal_link_area(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        view = call_app(self.app, method="GET", path="/", query_string="view=account-admin", cookie_header=cookie)
+        self.assertIn("Super Admin - Account Management", view["body"])
+        self.assertIn("Open settings", view["body"])
+        self.assertIn("user-settings-modal-", view["body"])
+
+    def test_deactivated_users_do_not_appear_in_system_lists(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=hiddenadmin&password=user&role=admin",
+            cookie_header=cookie,
+        )
+
+        users = self.app.get_users_with_completion(include_inactive=True)
+        target = next(u for u in users if u["username"] == "hiddenadmin")
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/update",
+            body=f"user_id={target['id']}&username=hiddenadmin&role=admin&is_active=0&password=",
+            cookie_header=cookie,
+        )
+
+        account_admin = call_app(self.app, method="GET", path="/", query_string="view=account-admin", cookie_header=cookie)
+        self.assertNotIn("hiddenadmin", account_admin["body"])
+
+        team_admin = call_app(self.app, method="GET", path="/", query_string="view=team-admin", cookie_header=cookie)
+        self.assertNotIn("hiddenadmin", team_admin["body"])
+
     def test_admin_can_send_notification_to_super_admin(self):
         admin_cookie = ""
         admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
