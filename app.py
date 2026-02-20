@@ -55,6 +55,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 28, "change": "Adjusted setup toggle flow and redesigned employer settings dashboard.", "result": "Settings UI changed significantly.", "why": "Improve responsiveness and clarity in employer configuration."},
     {"pr": 29, "change": "Reverted PR #28.", "result": "Dashboard/settings behavior returned to known-stable implementation.", "why": "Rollback after issues with the redesign/toggle behavior."},
     {"pr": 30, "change": "Fixed employer app toggles and delivered an updated settings dashboard layout.", "result": "Redesign landed with corrected behavior.", "why": "Reapply UX improvements without the regressions that triggered the prior revert."},
+    {"pr": 31, "change": "Made dashboard headers sticky with a scroll-condensed state and added a PR checklist reminder for Dev Log updates.", "result": "Long pages now keep context visible while scrolling and the merge process has an explicit Dev Log checkpoint.", "why": "Improve usability across long forms/lists and prevent Development Log drift from missed entries."},
 ]
 
 
@@ -1969,6 +1970,14 @@ class TaskTrackerApp:
         }});
       }});
     }});
+
+    const stickyHeaders = document.querySelectorAll('.dashboard-header');
+    const syncHeaderState = () => {{
+      const condensed = window.scrollY > 36;
+      stickyHeaders.forEach((header) => header.classList.toggle('is-condensed', condensed));
+    }};
+    syncHeaderState();
+    window.addEventListener('scroll', syncHeaderState, {{ passive: true }});
   </script>
 </body>
 </html>
