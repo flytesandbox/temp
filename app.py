@@ -1533,13 +1533,36 @@ class TaskTrackerApp:
             </section>
             """
 
-        team_panel = f"""
+        team_sections = [
+            ("completion", "Team Completion Status"),
+            ("administration", "Team Administration") if role == "super_admin" else None,
+            ("account-management", "Super Admin - Account Management") if role in {"super_admin", "admin", "broker"} else None,
+        ]
+        team_sections = [section for section in team_sections if section]
+        requested_team_section = (query.get("team_section", [""])[0] or "").strip().lower()
+        available_team_section_keys = {key for key, _ in team_sections}
+        active_team_section = requested_team_section if requested_team_section in available_team_section_keys else team_sections[0][0]
+        team_sub_nav = "".join(
+            f"<a class='nav-link {'active' if active_team_section == key else ''}' href='/?view=team&team_section={key}'>{label}</a>"
+            for key, label in team_sections
+        )
+
+        team_section_content = ""
+        if active_team_section == "completion":
+            team_section_content = f"""
             <section class='section-block'>
               <h3>Team Completion Status · {html.escape(team['name']) if team else 'Unassigned'}</h3>
               <ul class='status-list'>{status_rows}</ul>
             </section>
-            {super_admin_team_panel}
-            {broker_admin_section}
+            """
+        elif active_team_section == "administration":
+            team_section_content = super_admin_team_panel
+        elif active_team_section == "account-management":
+            team_section_content = broker_admin_section
+
+        team_panel = f"""
+            <nav class='dashboard-nav sub-nav'>{team_sub_nav}</nav>
+            {team_section_content}
         """
 
         employer_applications_panel = ""
