@@ -91,6 +91,7 @@ class TaskTrackerApp:
                 password_hash TEXT NOT NULL,
                 password_hint TEXT NOT NULL DEFAULT 'user',
                 role TEXT NOT NULL DEFAULT 'admin',
+                is_team_admin INTEGER NOT NULL DEFAULT 0,
                 theme TEXT NOT NULL DEFAULT 'default',
                 density TEXT NOT NULL DEFAULT 'comfortable',
                 created_by_user_id INTEGER,
@@ -243,6 +244,16 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN onboarding_complete INTEGER NOT NULL DEFAULT 0")
         if "shuffle_enabled" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN shuffle_enabled INTEGER NOT NULL DEFAULT 0")
+        if "is_team_admin" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN is_team_admin INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE users SET is_team_admin = 0 WHERE role != 'broker'")
+        db.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_team_admin_per_team
+            ON users(team_id)
+            WHERE role = 'broker' AND is_team_admin = 1 AND team_id IS NOT NULL AND is_active = 1
+            """
+        )
 
         team_task_columns = {row[1] for row in db.execute("PRAGMA table_info(team_tasks)").fetchall()}
         if team_task_columns and "status" not in team_task_columns:
@@ -509,6 +520,13 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/?view=team", flash=("error", "Only super admins can assign users to teams."))
             return self.handle_assign_user_to_team(start_response, session_user, self.parse_form(environ))
 
+        if path == "/teams/assign-broker-admin" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "super_admin":
+                return self.redirect(start_response, "/?view=team", flash=("error", "Only super admins can assign team broker admins."))
+            return self.handle_assign_broker_admin(start_response, session_user, self.parse_form(environ))
+
         if path == "/team-tasks/create" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
@@ -616,7 +634,7 @@ class TaskTrackerApp:
         db = self.db()
         rows = db.execute(
             """
-            SELECT id, username, role, is_active, team_id
+            SELECT id, username, role, is_active, team_id, is_team_admin
             FROM users
             WHERE role != 'super_admin'
             ORDER BY is_active DESC, username ASC
@@ -740,6 +758,29 @@ class TaskTrackerApp:
         rows = db.execute("SELECT id, username, team_id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY username").fetchall()
         db.close()
         return rows
+
+    def list_brokers_for_team(self, team_id: int):
+        db = self.db()
+        rows = db.execute(
+            "SELECT id, username, is_team_admin FROM users WHERE role = 'broker' AND team_id = ? AND is_active = 1 ORDER BY username",
+            (team_id,),
+        ).fetchall()
+        db.close()
+        return rows
+
+    def assign_team_admin_broker(self, broker_user_id: int, team_id: int):
+        db = self.db()
+        broker = db.execute(
+            "SELECT id FROM users WHERE id = ? AND role = 'broker' AND team_id = ? AND is_active = 1",
+            (broker_user_id, team_id),
+        ).fetchone()
+        if not broker:
+            db.close()
+            raise ValueError("Invalid broker or team.")
+        db.execute("UPDATE users SET is_team_admin = 0 WHERE role = 'broker' AND team_id = ?", (team_id,))
+        db.execute("UPDATE users SET is_team_admin = 1 WHERE id = ?", (broker_user_id,))
+        db.commit()
+        db.close()
 
     def list_assignable_users(self):
         db = self.db()
@@ -925,7 +966,7 @@ class TaskTrackerApp:
         if session_user["role"] == "super_admin":
             return target_user["role"] != "super_admin"
         if session_user["role"] == "broker":
-            return target_user["id"] == session_user["id"]
+            return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"broker", "employer"}
         if session_user["role"] == "admin":
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         return target_user["id"] == session_user["id"]
@@ -1240,9 +1281,13 @@ class TaskTrackerApp:
 
     def create_user(self, username: str, password: str, role: str, created_by_user_id: int | None = None, team_id: int | None = None):
         db = self.db()
+        is_team_admin = 1 if role == "broker" and db.execute(
+            "SELECT 1 FROM users WHERE role = 'broker' AND team_id = ? AND is_team_admin = 1 AND is_active = 1",
+            (team_id,),
+        ).fetchone() is None else 0
         db.execute(
-            "INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",
-            (username, username.capitalize(), hash_password(password), password, role, created_by_user_id, team_id),
+            "INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
+            (username, username.capitalize(), hash_password(password), password, role, created_by_user_id, team_id, is_team_admin),
         )
         db.commit()
         db.close()
@@ -1255,8 +1300,8 @@ class TaskTrackerApp:
             raise ValueError("User not found")
         password_hash = hash_password(password) if password else user["password_hash"]
         db.execute(
-            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ? WHERE id = ?",
-            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], is_active, user_id),
+            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ?, is_team_admin = CASE WHEN ? = 'broker' AND is_team_admin = 1 THEN 1 ELSE 0 END WHERE id = ?",
+            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], is_active, role, user_id),
         )
         db.commit()
         db.close()
@@ -1514,8 +1559,13 @@ class TaskTrackerApp:
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
+        if session_user["role"] == "broker" and role not in {"broker", "employer"}:
+            return self.redirect(start_response, "/", flash=("error", "Brokers can only create broker or employer users."))
         creator_level = ROLE_LEVELS.get(session_user["role"], -1)
-        if ROLE_LEVELS.get(role, -1) >= creator_level:
+        role_level = ROLE_LEVELS.get(role, -1)
+        if role_level < 0:
+            return self.redirect(start_response, "/", flash=("error", "Invalid role selected."))
+        if session_user["role"] != "broker" and role_level >= creator_level:
             return self.redirect(start_response, "/", flash=("error", "You can only create users below your role level."))
         if len(username) < 3:
             return self.redirect(start_response, "/", flash=("error", "New users need a username (3+)."))
@@ -1546,7 +1596,11 @@ class TaskTrackerApp:
         is_active = 1 if form.get("is_active", "1") == "1" else 0
         actor_level = ROLE_LEVELS.get(session_user["role"], -1)
         target_level = ROLE_LEVELS.get(role, -1)
-        if target_level < 0 or target_level >= actor_level:
+        if session_user["role"] == "broker" and role not in {"broker", "employer"}:
+            return self.redirect(start_response, "/", flash=("error", "Brokers can only manage broker or employer users."))
+        if target_level < 0:
+            return self.redirect(start_response, "/", flash=("error", "Invalid role selected."))
+        if session_user["role"] != "broker" and target_level >= actor_level:
             return self.redirect(start_response, "/", flash=("error", "You can only assign roles below your own."))
 
         target_user = self.get_user_by_id(user_id)
@@ -1827,6 +1881,20 @@ class TaskTrackerApp:
         self.log_action(session_user["id"], "team_assignment_updated", "user", user_id, target["username"] if target else "user", f"team_id={team_id}")
         return self.redirect(start_response, "/?view=team", flash=("success", "User reassigned to team."))
 
+    def handle_assign_broker_admin(self, start_response, session_user, form):
+        try:
+            broker_user_id = int(form.get("broker_user_id", ""))
+            team_id = int(form.get("team_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=team", flash=("error", "Select a broker and a team."))
+        try:
+            self.assign_team_admin_broker(broker_user_id, team_id)
+        except ValueError:
+            return self.redirect(start_response, "/?view=team", flash=("error", "Invalid broker team admin assignment."))
+        target = self.get_user_by_id(broker_user_id)
+        self.log_action(session_user["id"], "team_broker_admin_assigned", "user", broker_user_id, target["username"] if target else "broker", f"team_id={team_id}")
+        return self.redirect(start_response, "/?view=team", flash=("success", "Team broker admin updated."))
+
 
     def handle_create_team_task(self, start_response, session_user, form):
         title = form.get("title", "").strip()
@@ -2073,11 +2141,15 @@ class TaskTrackerApp:
             users_for_admin = self.get_users_for_account_management(user)
 
             user_settings_modals = ""
+            if role == "broker":
+                editable_role_options = ["broker", "employer"]
+            else:
+                editable_role_options = ["admin", "broker", "employer"]
             user_rows = "".join(
                 f"""
                 <tr>
                   <td>{html.escape(row['username'])}</td>
-                  <td>{html.escape(row['role'])}</td>
+                      <td>{html.escape(row['role'])}{" · Team Admin" if row['role'] == 'broker' and row['is_team_admin'] else ''}</td>
                   <td>{'Active' if row['is_active'] else 'Deactivated'}</td>
                   <td>
                     <button type='button' class='table-link as-button' data-modal-open='user-settings-{row['id']}'>Open settings</button>
@@ -2100,9 +2172,7 @@ class TaskTrackerApp:
                       </label>
                       <label>Role
                         <select name='role'>
-                          <option value='admin' {'selected' if row['role'] == 'admin' else ''}>admin</option>
-                          <option value='broker' {'selected' if row['role'] == 'broker' else ''}>broker</option>
-                          <option value='employer' {'selected' if row['role'] == 'employer' else ''}>employer</option>
+                          {''.join(f"<option value='{option}' {'selected' if row['role'] == option else ''}>{option}</option>" for option in editable_role_options)}
                         </select>
                       </label>
                       <label>Status
@@ -2121,7 +2191,7 @@ class TaskTrackerApp:
                 """
                 for row in users_for_admin
             )
-            create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option>"
+            create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option>" if role != "broker" else "<option value='broker'>broker</option><option value='employer'>employer</option>"
             create_team_options = "".join(f"<option value='{row['id']}'>{html.escape(row['name'])}</option>" for row in self.list_teams())
             create_team_select = f"<select name='team_id' required><option value=''>Select team</option>{create_team_options}</select>" if role == "super_admin" else ""
             broker_admin_section = f"""
@@ -2193,6 +2263,13 @@ class TaskTrackerApp:
         assignable_admins = self.list_assignable_admins()
         team_options = "".join(f"<option value='{row['id']}'>{html.escape(row['name'])}</option>" for row in teams)
         admin_options = "".join(f"<option value='{row['id']}'>{html.escape(row['username'])}</option>" for row in assignable_admins)
+        broker_team_admin_options = "".join(
+            f"<option value='{broker['id']}'>"
+            f"{html.escape(team['name'])} · {html.escape(broker['username'])}{' (team admin)' if broker['is_team_admin'] else ''}"
+            "</option>"
+            for team in teams
+            for broker in self.list_brokers_for_team(team["id"])
+        )
         assignable_users = self.list_assignable_users()
         assignable_user_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
@@ -2326,6 +2403,11 @@ class TaskTrackerApp:
                 <select name='user_id' required><option value=''>Select user</option>{assignable_user_options}</select>
                 <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
                 <button type='submit'>Assign User to Team</button>
+              </form>
+              <form method='post' action='/teams/assign-broker-admin' class='inline-form'>
+                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
+                <select name='broker_user_id' required><option value=''>Select broker</option>{broker_team_admin_options}</select>
+                <button type='submit'>Set Team Broker Admin</button>
               </form>
               <div class='table-wrap'><table class='user-table'>
                 <thead><tr><th>Active Team</th><th>Admins</th><th>Brokers</th><th>Employers</th><th>Members</th></tr></thead>
