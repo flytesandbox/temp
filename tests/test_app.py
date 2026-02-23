@@ -307,6 +307,30 @@ class AppTests(unittest.TestCase):
         self.assertEqual(len(final_admin), 1)
         self.assertEqual(final_admin[0]["username"], "westbroker2")
 
+    def test_only_super_admin_can_assign_team_broker_admin(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_broker = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokerviewer&role=broker",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_broker["headers"]).get("Location"), "/")
+
+        broker_user = next(u for u in self.app.get_users_with_completion() if u["username"] == "brokerviewer")
+        denied = call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-broker-admin",
+            body=f"team_id=1&broker_user_id={broker_user['id']}",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(denied["headers"]).get("Location"), "/?view=team")
+
     def test_login_session_cookie_allows_immediate_dashboard_access(self):
         cookie = ""
 
