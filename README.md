@@ -1,17 +1,6 @@
 # Monolith Task Tracker
 
-A simple monolith Python app with shared task tracking, user settings, super-admin user management, and an added Employer onboarding workflow.
-
-## Features
-
-- Session-based login/logout.
-- Seeded users (`alex`, `sam`) and super admin (`admin`).
-- Shared deployment-readiness task and team completion status.
-- User profile updates and dashboard style preferences.
-- Super admin user creation and update controls.
-- Added Employer onboarding form that creates Employer accounts after form completion.
-- Employer-role accounts are read-only and only see employers created by their manager/creator user.
-- SQLite persistence with stdlib only.
+Full-stack Python monolith for team operations and ICHRA onboarding, now redesigned with a card-first mobile-inspired UX and deterministic per-user personalization.
 
 ## Run locally
 
@@ -24,5 +13,23 @@ Open `http://localhost:8000`.
 ## Test
 
 ```bash
-python -m unittest tests/test_app.py
+python -m pytest -q
 ```
+
+## UI/UX Redesign Highlights
+- Full IA refresh with bottom navigation and app-shell layout.
+- First-run onboarding (avatar + preference toggle).
+- Home, Library, Action, History, Profile, and Settings experiences.
+- Deterministic personalization per user:
+  - theme variant
+  - module order
+  - vibe pack
+
+## Verify "different user experience"
+1. Login as `alex` (`user`) and complete first-run onboarding.
+2. Logout, login as `sam` (`user`).
+3. Compare:
+   - header banner values (theme/vibe/seed)
+   - home section ordering
+   - accent/theme treatment
+4. Log out/in again to confirm consistency persists.
