@@ -1,4 +1,5 @@
 import io
+import re
 from http import cookies
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -134,8 +135,12 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=devlog")
         self.assertIn("Dev Log", dashboard["body"])
         self.assertIn("Development Log", dashboard["body"])
-        self.assertIn("PR #1", dashboard["body"])
-        self.assertIn("PR #30", dashboard["body"])
+        self.assertIn("Merged At (UTC)", dashboard["body"])
+
+        prs = sorted(int(value) for value in re.findall(r">PR #(\d+)</td>", dashboard["body"]))
+        self.assertTrue(prs, "Expected at least one PR entry in the development log")
+        self.assertEqual(prs, list(range(1, prs[-1] + 1)))
+        self.assertRegex(dashboard["body"], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC")
     def test_login_required_redirects_to_login(self):
         response = call_app(self.app, method="GET", path="/")
         self.assertTrue(response["status"].startswith("302"))
