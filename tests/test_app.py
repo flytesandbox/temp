@@ -222,6 +222,86 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=teambroker&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
+    def test_broker_can_create_broker_and_employer_but_not_admin(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_broker = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokerlead&role=broker",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_broker["headers"]).get("Location"), "/")
+
+        broker_cookie = ""
+        login_broker = call_app(self.app, method="POST", path="/login", body="username=brokerlead&password=user")
+        broker_cookie = merge_cookies(broker_cookie, login_broker["headers"])
+
+        denied = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=shouldfail&role=admin",
+            cookie_header=broker_cookie,
+        )
+        self.assertEqual(dict(denied["headers"]).get("Location"), "/")
+
+        allowed_broker = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokerpeer&role=broker",
+            cookie_header=broker_cookie,
+        )
+        self.assertEqual(dict(allowed_broker["headers"]).get("Location"), "/")
+
+        allowed_employer = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=brokeremployer&role=employer",
+            cookie_header=broker_cookie,
+        )
+        self.assertEqual(dict(allowed_employer["headers"]).get("Location"), "/")
+
+    def test_team_has_single_broker_team_admin_and_can_be_reassigned(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        create_team = call_app(self.app, method="POST", path="/teams/create", body="name=West+Team", cookie_header=cookie)
+        self.assertEqual(dict(create_team["headers"]).get("Location"), "/?view=team")
+
+        create_broker_one = call_app(self.app, method="POST", path="/admin/users/create", body="username=westbroker1&role=broker&team_id=2", cookie_header=cookie)
+        create_broker_two = call_app(self.app, method="POST", path="/admin/users/create", body="username=westbroker2&role=broker&team_id=2", cookie_header=cookie)
+        self.assertEqual(dict(create_broker_one["headers"]).get("Location"), "/")
+        self.assertEqual(dict(create_broker_two["headers"]).get("Location"), "/")
+
+        db = self.app.db()
+        first_admin = db.execute("SELECT username FROM users WHERE team_id = 2 AND role = 'broker' AND is_team_admin = 1").fetchall()
+        db.close()
+        self.assertEqual(len(first_admin), 1)
+        self.assertEqual(first_admin[0]["username"], "westbroker1")
+
+        broker_two = next(u for u in self.app.get_users_with_completion() if u["username"] == "westbroker2")
+        reassign = call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-broker-admin",
+            body=f"team_id=2&broker_user_id={broker_two['id']}",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(reassign["headers"]).get("Location"), "/?view=team")
+
+        db = self.app.db()
+        final_admin = db.execute("SELECT username FROM users WHERE team_id = 2 AND role = 'broker' AND is_team_admin = 1").fetchall()
+        db.close()
+        self.assertEqual(len(final_admin), 1)
+        self.assertEqual(final_admin[0]["username"], "westbroker2")
+
     def test_login_session_cookie_allows_immediate_dashboard_access(self):
         cookie = ""
 
