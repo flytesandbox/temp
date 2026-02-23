@@ -13,7 +13,7 @@ from wsgiref.simple_server import make_server
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = BASE_DIR / "app.db"
 PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
-ALLOWED_THEMES = {"default", "sunset", "midnight"}
+ALLOWED_THEMES = {"default", "sunset", "midnight", "dawn", "mint", "lavender"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
 ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 
@@ -228,6 +228,20 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
         if "team_id" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN team_id INTEGER")
+        if "user_seed" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN user_seed TEXT")
+        if "theme_variant" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN theme_variant TEXT")
+        if "home_layout" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN home_layout TEXT")
+        if "vibe_pack" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN vibe_pack TEXT")
+        if "avatar_symbol" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN avatar_symbol TEXT")
+        if "onboarding_complete" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN onboarding_complete INTEGER NOT NULL DEFAULT 0")
+        if "shuffle_enabled" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN shuffle_enabled INTEGER NOT NULL DEFAULT 0")
 
         team_task_columns = {row[1] for row in db.execute("PRAGMA table_info(team_tasks)").fetchall()}
         if team_task_columns and "status" not in team_task_columns:
@@ -258,6 +272,7 @@ class TaskTrackerApp:
                 (hash_password("user"), "admin"),
             ],
         )
+        db.execute("UPDATE users SET onboarding_complete = 1 WHERE username IN ('alex','sam','admin')")
         db.executemany(
             """
             UPDATE users
@@ -404,6 +419,16 @@ class TaskTrackerApp:
             if session_user["role"] == "employer":
                 return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             return self.handle_style_settings(start_response, session_user, self.parse_form(environ))
+
+        if path == "/onboarding/complete" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_onboarding_complete(start_response, session_user, self.parse_form(environ))
+
+        if path == "/settings/preferences" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_preferences_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/admin/users/create" and method == "POST":
             if not session_user:
@@ -1428,6 +1453,63 @@ class TaskTrackerApp:
         self.log_action(session_user["id"], "style_updated", "user", session_user["id"], session_user["username"], f"theme={theme},density={density}")
         return self.redirect(start_response, "/", flash=("success", "Dashboard style saved."))
 
+    def ensure_user_personalization(self, user):
+        base = f"{user['id']}:{user['username']}"
+        seed = hashlib.sha256(base.encode("utf-8")).hexdigest()
+        themes = ["sunset", "dawn", "mint", "lavender", "midnight"]
+        vibes = ["orbit", "spark", "kite", "burst", "pixel"]
+        orders = [
+            "recent,favorites,recommended",
+            "favorites,recommended,recent",
+            "recommended,recent,favorites",
+            "recent,recommended,favorites",
+        ]
+        avatar_symbols = ["◉", "✦", "▲", "✶", "◆"]
+        theme = user["theme_variant"] or themes[int(seed[:2], 16) % len(themes)]
+        order = user["home_layout"] or orders[int(seed[2:4], 16) % len(orders)]
+        vibe = user["vibe_pack"] or vibes[int(seed[4:6], 16) % len(vibes)]
+        avatar = user["avatar_symbol"] or avatar_symbols[int(seed[6:8], 16) % len(avatar_symbols)]
+        onboarding_complete = user["onboarding_complete"]
+        if user["user_seed"] and user["theme_variant"] and user["home_layout"] and user["vibe_pack"] and user["avatar_symbol"]:
+            return {"seed": user["user_seed"], "theme": theme, "order": order, "vibe": vibe, "avatar": avatar, "onboarding_complete": onboarding_complete}
+        db = self.db()
+        db.execute(
+            """
+            UPDATE users
+            SET user_seed = COALESCE(user_seed, ?),
+                theme_variant = COALESCE(theme_variant, ?),
+                home_layout = COALESCE(home_layout, ?),
+                vibe_pack = COALESCE(vibe_pack, ?),
+                avatar_symbol = COALESCE(avatar_symbol, ?)
+            WHERE id = ?
+            """,
+            (seed, theme, order, vibe, avatar, user["id"]),
+        )
+        db.commit()
+        db.close()
+        return {"seed": seed, "theme": theme, "order": order, "vibe": vibe, "avatar": avatar, "onboarding_complete": onboarding_complete}
+
+    def handle_onboarding_complete(self, start_response, session_user, form):
+        avatar_symbol = (form.get("avatar_symbol") or "").strip()[:2] or None
+        shuffle_enabled = 1 if form.get("shuffle_enabled") == "1" else 0
+        db = self.db()
+        db.execute(
+            "UPDATE users SET onboarding_complete = 1, avatar_symbol = COALESCE(?, avatar_symbol), shuffle_enabled = ? WHERE id = ?",
+            (avatar_symbol, shuffle_enabled, session_user["id"]),
+        )
+        db.commit()
+        db.close()
+        self.log_action(session_user["id"], "onboarding_completed", "user", session_user["id"], session_user["username"], "Completed first-run profile setup")
+        return self.redirect(start_response, "/", flash=("success", "Personal workspace ready."))
+
+    def handle_preferences_settings(self, start_response, session_user, form):
+        shuffle_enabled = 1 if form.get("shuffle_enabled") == "1" else 0
+        db = self.db()
+        db.execute("UPDATE users SET shuffle_enabled = ? WHERE id = ?", (shuffle_enabled, session_user["id"]))
+        db.commit()
+        db.close()
+        return self.redirect(start_response, "/?view=settings", flash=("success", "Preferences updated."))
+
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
@@ -1839,22 +1921,27 @@ class TaskTrackerApp:
             for row in demo_accounts
         )
         html_body = self.flash_html(flash_message) + f"""
-            <section class="card auth-card">
-              <p class="eyebrow">Monolith Workspace</p>
-              <h1>Log in to continue</h1>
-              <p class="subtitle">Choose your account and keep the deployment checklist moving.</p>
+            <section class="card auth-card app-shell vibe-orbit">
+              <header class='app-header'>
+                <div>
+                  <p class="eyebrow">Monolith Flow</p>
+                  <h1>Welcome back</h1>
+                  <p class="subtitle">A retro-tactile workspace for ICHRA onboarding and team operations.</p>
+                </div>
+                <div class='avatar-chip'>◉</div>
+              </header>
               <form method="post" action="/login" class="form-grid">
                 <label>Username <input type="text" name="username" placeholder="alex" required /></label>
                 <label>Password <input type="password" name="password" placeholder="user" required /></label>
-                <button type="submit">Log In to Continue</button>
+                <button type="submit" class='primary-action'>Start workspace</button>
               </form>
-              <div class="hint"><strong>Active demo accounts (DB-backed):</strong>
-                <ul>{demo_rows or '<li>No active users found.</li>'}</ul>
-              </div>
-              <hr />
+              <section class='section-block panel-card'>
+                <h3>Active demo accounts (DB-backed)</h3>
+                <ul class='status-list compact-list'>{demo_rows or '<li>No active users found.</li>'}</ul>
+              </section>
               <section class="section-block panel-card welcome-panel">
-                <h2>New Employer Setup</h2>
-                <p class="subtitle">Start your employer journey with a quick intake. We'll guide your team from first step to launch.</p>
+                <h3>First time employer?</h3>
+                <p class="subtitle">Open the 30-second intake and get a pre-built onboarding workspace.</p>
                 <button type="button" class="secondary" data-modal-open="new-employer-modal">Open New Employer Setup</button>
               </section>
             </section>
@@ -1862,9 +1949,8 @@ class TaskTrackerApp:
               <div class="modal-backdrop" data-modal-close="new-employer-modal"></div>
               <section class="modal-card card">
                 <button type="button" class="modal-close" aria-label="Close" data-modal-close="new-employer-modal">×</button>
-                <p class="eyebrow">Welcome aboard</p>
+                <p class="eyebrow">Quick intake</p>
                 <h2>Prospective Employer Sign Up</h2>
-                <p class="subtitle">Tell us about your company and we will prepare your personalized onboarding workspace.</p>
                 <form method="post" action="/signup" class="form-grid">
                   <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
                   <label>Contact Name <input type="text" name="prospect_name" required /></label>
@@ -1883,6 +1969,11 @@ class TaskTrackerApp:
     def render_dashboard(self, start_response, user, flash_message, active_view="dashboard", query=None):
         query = query or {}
         role = user["role"]
+        personalization = self.ensure_user_personalization(user)
+        theme_variant = user["theme"] if user["theme"] != "default" else personalization["theme"]
+        vibe_pack = personalization["vibe"]
+        module_order = personalization["order"].split(",")
+        avatar_symbol = personalization["avatar"]
         team = self.get_team_for_user(user["id"])
         team_tasks = self.list_visible_team_tasks(user)
         team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
@@ -2073,6 +2164,9 @@ class TaskTrackerApp:
                         <option value='default' {'selected' if user['theme'] == 'default' else ''}>Default</option>
                         <option value='sunset' {'selected' if user['theme'] == 'sunset' else ''}>Sunset</option>
                         <option value='midnight' {'selected' if user['theme'] == 'midnight' else ''}>Midnight</option>
+                        <option value='dawn' {'selected' if user['theme'] == 'dawn' else ''}>Dawn</option>
+                        <option value='mint' {'selected' if user['theme'] == 'mint' else ''}>Mint</option>
+                        <option value='lavender' {'selected' if user['theme'] == 'lavender' else ''}>Lavender</option>
                       </select>
                     </label>
                     <label>Density
@@ -2082,6 +2176,13 @@ class TaskTrackerApp:
                       </select>
                     </label>
                     <button type='submit'>Apply Styling</button>
+                  </form>
+                </div>
+                <div>
+                  <h3>Experience Preferences</h3>
+                  <form method='post' action='/settings/preferences' class='form-grid'>
+                    <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle recommendations</label>
+                    <button type='submit'>Save Preferences</button>
                   </form>
                 </div>
               </section>
@@ -2402,39 +2503,94 @@ class TaskTrackerApp:
         except ValueError:
             selected_employer_id = None
 
+        home_sections = {
+            "recent": f"<section class='section-block panel-card'><h3>Recently used</h3><p class='subtitle'>Quickly jump back into active workspaces and tasks.</p>{team_task_engine_panel}</section>",
+            "favorites": f"<section class='section-block panel-card'><h3>Favorites</h3><p class='subtitle'>Pinned items based on your role and ICHRA responsibilities.</p>{broker_refer_cta or forms_workspace_cta}</section>",
+            "recommended": f"<section class='section-block panel-card'><h3>Recommended next actions</h3><h4>Workflow Snapshot</h4><p class='subtitle'>{forms_workspace_hint}</p>{task_section}<div class='stats-grid'><article><h4>Employers</h4><p>{len(employers)}</p></article><article><h4>Open tasks</h4><p>{sum(1 for row in team_tasks if row['status'] == 'open')}</p></article><article><h4>Unread</h4><p>{unseen_count}</p></article></div></section>",
+        }
+        dashboard_panel = "".join(home_sections.get(k, "") for k in module_order) + employer_workspace
+
+        profile_panel = f"""
+            <section class='section-block panel-card'>
+              <h3>Profile</h3>
+              <p class='subtitle'>Avatar, identity, and contribution summary.</p>
+              <div class='avatar-hero'>{html.escape(avatar_symbol)} <strong>{html.escape(user['display_name'])}</strong> · {html.escape(role)}</div>
+              <div class='stats-grid'>
+                <article><h4>Completed applications</h4><p>{sum(1 for row in employers if row['application_complete'])}</p></article>
+                <article><h4>Team tasks done</h4><p>{sum(1 for row in team_tasks if row['status'] == 'completed')}</p></article>
+                <article><h4>Notifications</h4><p>{len(notifications)}</p></article>
+              </div>
+            </section>
+        """
+
         panel_lookup = {
             "dashboard": dashboard_panel,
+            "home": dashboard_panel,
+            "library": employer_applications_panel if role == "employer" else employers_panel,
             "team": team_panel,
+            "action": self.render_ichra_application_form(user, selected_employer_id=selected_employer_id, artifact_view=artifact_view) if show_application else "",
             "application": self.render_ichra_application_form(user, selected_employer_id=selected_employer_id, artifact_view=artifact_view) if show_application else "",
             "employers": employers_panel,
             "applications": employer_applications_panel if role == "employer" else employers_panel,
+            "history": notifications_panel,
             "notifications": notifications_panel,
+            "profile": profile_panel,
             "devlog": devlog_panel,
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",
         }
-        active_panel = panel_lookup.get(active_view, "")
-        if not active_panel:
-            active_view = "dashboard"
-            active_panel = dashboard_panel
+
+        if not personalization["onboarding_complete"] and active_view in {"dashboard", "home"}:
+            active_view = "onboarding"
+            active_panel = f"""
+              <section class='section-block panel-card'>
+                <h3>First Run Personalization</h3>
+                <p class='subtitle'>30-second setup for your ICHRA Setup Workspace: choose an avatar and turn shuffle mode on/off.</p>
+                <form method='post' action='/onboarding/complete' class='form-grid'>
+                  <label>Avatar symbol <input name='avatar_symbol' maxlength='2' placeholder='{html.escape(avatar_symbol)}' /></label>
+                  <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle-style module rotation</label>
+                  <button type='submit' class='primary-action'>Finish setup</button>
+                </form>
+              </section>
+            """
+        else:
+            active_panel = panel_lookup.get(active_view, "")
+            if not active_panel:
+                active_view = "dashboard"
+                active_panel = dashboard_panel
+
+        bottom_nav = [
+            ("home", "Home", "⌂"),
+            ("library", "Library", "▦"),
+            ("action", "Action", "＋"),
+            ("history", "History", "◷"),
+            ("settings", "Settings", "⚙"),
+        ]
+        bottom_nav_html = "".join(
+            f"<a class='nav-link bottom-item {'active' if active_view == key else ''}' href='/?view={key}'><span>{icon}</span><small>{label}</small></a>"
+            for key, label, icon in bottom_nav
+        )
 
         password_banner = ""
         if user["must_change_password"]:
             password_banner = "<div class='flash-stack'><div class='flash error persistent-banner'>Security notice: your temporary password is still active. Please update your password in Settings.</div></div>"
 
         html_body = password_banner + self.flash_html(flash_message) + f"""
-            <section class='card dashboard role-{role} theme-{user['theme']} density-{user['density']}'>
-              <div class='welcome-banner'>{html.escape(role_banner)}</div>
-              <header class='dashboard-header'>
+            <section class='card dashboard app-shell role-{role} theme-{theme_variant} density-{user['density']} vibe-{vibe_pack}'>
+              <header class='dashboard-header app-header'>
                 <div>
                   <h1>{html.escape(role_title)}</h1>
                   <p class='subtitle'>Welcome, {html.escape(user['display_name'])}</p>
                 </div>
-                {header_primary_cta}
-                <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
+                <div class='header-actions'>
+                  <span class='avatar-chip'>{html.escape(avatar_symbol)}</span>
+                  {header_primary_cta}
+                  <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
+                </div>
               </header>
-              <nav class='dashboard-nav'>{nav_html}</nav>
+              <div class='welcome-banner'>Theme: {theme_variant.title()} · Vibe pack: {vibe_pack.title()} · Layout seed: {html.escape(personalization['seed'][:8])}</div>
               {active_panel}
+              <nav class='bottom-nav'>{bottom_nav_html}</nav>
             </section>
             {employer_application_modal}
             """
