@@ -2666,18 +2666,6 @@ class TaskTrackerApp:
                 active_view = "dashboard"
                 active_panel = dashboard_panel
 
-        bottom_nav = [
-            ("home", "Home", "⌂"),
-            ("library", "Library", "▦"),
-            ("action", "Action", "＋"),
-            ("history", "History", "◷"),
-            ("settings", "Settings", "⚙"),
-        ]
-        bottom_nav_html = "".join(
-            f"<a class='nav-link bottom-item {'active' if active_view == key else ''}' href='/?view={key}'><span>{icon}</span><small>{label}</small></a>"
-            for key, label, icon in bottom_nav
-        )
-
         password_banner = ""
         if user["must_change_password"]:
             password_banner = "<div class='flash-stack'><div class='flash error persistent-banner'>Security notice: your temporary password is still active. Please update your password in Settings.</div></div>"
@@ -2695,9 +2683,13 @@ class TaskTrackerApp:
                   <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
                 </div>
               </header>
-              <div class='welcome-banner'>Theme: {theme_variant.title()} · Vibe pack: {vibe_pack.title()} · Layout seed: {html.escape(personalization['seed'][:8])}</div>
-              {active_panel}
-              <nav class='bottom-nav'>{bottom_nav_html}</nav>
+              <div class='dashboard-layout'>
+                <nav class='dashboard-nav floating-nav'>{nav_html}</nav>
+                <div class='dashboard-content'>
+                  <div class='welcome-banner'>Theme: {theme_variant.title()} · Vibe pack: {vibe_pack.title()} · Layout seed: {html.escape(personalization['seed'][:8])}</div>
+                  {active_panel}
+                </div>
+              </div>
             </section>
             {employer_application_modal}
             """
