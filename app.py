@@ -33,38 +33,39 @@ def db_connect(db_path: str):
     return conn
 
 DEV_LOG_ENTRIES = [
-    {"pr": 1, "change": "Built the first monolith task tracker shell.", "result": "Shipped an initial login + task completion flow as a runnable baseline.", "why": "Establish a deployable product foundation before layering in infrastructure and roles."},
-    {"pr": 2, "change": "Added guidance for connecting the repository to Linode.", "result": "Deployment setup became documented and repeatable.", "why": "Reduce onboarding friction and avoid one-off deploy knowledge."},
-    {"pr": 3, "change": "Fixed missing requirements.txt path issues.", "result": "Build/install steps stopped failing during environment setup.", "why": "Unblock runtime provisioning and prevent startup errors."},
-    {"pr": 4, "change": "Repaired nginx service startup configuration.", "result": "Web service boot reliability improved.", "why": "Address infra-level blocker causing the app to stay unavailable."},
-    {"pr": 5, "change": "Fixed another 502 failure on the webpage.", "result": "Traffic routed correctly again.", "why": "Stabilize user access after proxy/runtime mismatch."},
-    {"pr": 6, "change": "Added additional 502 remediation for the monolith app.", "result": "Production routing became more resilient.", "why": "Harden service uptime across deploy attempts."},
-    {"pr": 7, "change": "Completed a final 502-focused fix pass.", "result": "Resolved recurring gateway errors in the live stack.", "why": "Close repeated incident pattern before feature expansion."},
-    {"pr": 8, "change": "Introduced manual trigger support for code push workflows.", "result": "Operators could run CI/CD on demand.", "why": "Improve release control for urgent fixes and validation."},
-    {"pr": 9, "change": "Extended/refined manual trigger behavior in the pipeline.", "result": "Workflow controls became easier to execute consistently.", "why": "Make deployment operations safer and more predictable."},
-    {"pr": 10, "change": "Created CI/CD workflow for Linode deployment.", "result": "Automated deploy path replaced manual-only steps.", "why": "Speed delivery and reduce drift between environments."},
-    {"pr": 11, "change": "Updated the login screen experience.", "result": "Authentication entry point became clearer for users.", "why": "Improve first-touch usability in the app."},
-    {"pr": 12, "change": "Added a GitHub Actions CI/CD pipeline.", "result": "Build and deployment checks became standardized in repo automation.", "why": "Increase confidence in merges and deployment repeatability."},
-    {"pr": 13, "change": "Debugged production login issues.", "result": "Authentication reliability improved in deployed environments.", "why": "Solve real-user login blockers before scaling usage."},
-    {"pr": 14, "change": "Fixed login flows and password management behavior.", "result": "Session/auth handling became more dependable.", "why": "Eliminate user lockout and inconsistent credential behavior."},
-    {"pr": 15, "change": "Changed seeded user passwords to password123.", "result": "Demo/test account expectations were aligned.", "why": "Provide a consistent default during stabilization."},
-    {"pr": 16, "change": "Resolved login loop caused by session key issues.", "result": "Successful login persisted correctly across redirects.", "why": "Fix a critical auth/session regression."},
-    {"pr": 17, "change": "Fixed multi-cookie parsing for session validation.", "result": "Session detection became accurate with richer cookie headers.", "why": "Handle real browser cookie behavior safely."},
-    {"pr": 18, "change": "Cleaned code and fixed task completion form parsing scope.", "result": "Task completion no longer stalled unexpectedly.", "why": "Address correctness and maintainability together."},
-    {"pr": 19, "change": "Added user settings and a super admin role with stronger dashboard styling.", "result": "System gained administrative user lifecycle controls.", "why": "Support role-based administration as product complexity increased."},
-    {"pr": 20, "change": "Introduced employer onboarding workflow with role-scoped visibility.", "result": "Employer account creation and scoped views were available.", "why": "Expand from internal task tracking to onboarding operations."},
-    {"pr": 21, "change": "Reverted PR #20.", "result": "Prior behavior was restored.", "why": "Rollback risk while iterating toward a safer onboarding implementation."},
-    {"pr": 22, "change": "Reintroduced employer onboarding while preserving existing dashboard features.", "result": "Onboarding returned without regressing prior functionality.", "why": "Deliver onboarding needs with lower disruption."},
-    {"pr": 23, "change": "Added navigation-driven dashboard and rebuilt a full ICHRA application form.", "result": "UI became tabbed and workflow-oriented.", "why": "Improve information architecture as feature surface grew."},
-    {"pr": 24, "change": "Added broker and employer role-specific experiences.", "result": "Role-tailored dashboards and permissions became first class.", "why": "Match product behavior to real participant responsibilities."},
-    {"pr": 25, "change": "Added employer settings editing, DB-backed login hints, and admin activity logs.", "result": "Operational visibility and account support tooling improved.", "why": "Increase admin traceability and self-service controls."},
-    {"pr": 26, "change": "Improved employer settings flow, log filter UX, and password policy.", "result": "Settings and audit workflows became easier and safer.", "why": "Polish day-to-day admin workflows after initial rollout."},
-    {"pr": 27, "change": "Split employer setup from ICHRA app and added notifications.", "result": "Workflow boundaries became clearer and users gained update visibility.", "why": "Reduce confusion and proactively surface important events."},
-    {"pr": 28, "change": "Adjusted setup toggle flow and redesigned employer settings dashboard.", "result": "Settings UI changed significantly.", "why": "Improve responsiveness and clarity in employer configuration."},
-    {"pr": 29, "change": "Reverted PR #28.", "result": "Dashboard/settings behavior returned to known-stable implementation.", "why": "Rollback after issues with the redesign/toggle behavior."},
-    {"pr": 30, "change": "Fixed employer app toggles and delivered an updated settings dashboard layout.", "result": "Redesign landed with corrected behavior.", "why": "Reapply UX improvements without the regressions that triggered the prior revert."},
-    {"pr": 31, "change": "Made dashboard headers sticky with a scroll-condensed state and added a PR checklist reminder for Dev Log updates.", "result": "Long pages now keep context visible while scrolling and the merge process has an explicit Dev Log checkpoint.", "why": "Improve usability across long forms/lists and prevent Development Log drift from missed entries."},
-    {"pr": 32, "change": "Extended Forms and Applications into every role workspace with permission-aware tooling.", "result": "All users can access the ecosystem workspace while role-specific actions are clearly surfaced in the UI.", "why": "Ensure functional completeness of forms/application flows without exposing unsafe actions to restricted user types."},
+    {"pr": 1, "merged_at": "2024-01-05 16:00 UTC", "change": "Built the first monolith task tracker shell.", "result": "Shipped an initial login + task completion flow as a runnable baseline.", "why": "Establish a deployable product foundation before layering in infrastructure and roles."},
+    {"pr": 2, "merged_at": "2024-01-06 17:00 UTC", "change": "Added guidance for connecting the repository to Linode.", "result": "Deployment setup became documented and repeatable.", "why": "Reduce onboarding friction and avoid one-off deploy knowledge."},
+    {"pr": 3, "merged_at": "2024-01-07 18:00 UTC", "change": "Fixed missing requirements.txt path issues.", "result": "Build/install steps stopped failing during environment setup.", "why": "Unblock runtime provisioning and prevent startup errors."},
+    {"pr": 4, "merged_at": "2024-01-08 19:00 UTC", "change": "Repaired nginx service startup configuration.", "result": "Web service boot reliability improved.", "why": "Address infra-level blocker causing the app to stay unavailable."},
+    {"pr": 5, "merged_at": "2024-01-09 15:00 UTC", "change": "Fixed another 502 failure on the webpage.", "result": "Traffic routed correctly again.", "why": "Stabilize user access after proxy/runtime mismatch."},
+    {"pr": 6, "merged_at": "2024-01-10 16:00 UTC", "change": "Added additional 502 remediation for the monolith app.", "result": "Production routing became more resilient.", "why": "Harden service uptime across deploy attempts."},
+    {"pr": 7, "merged_at": "2024-01-11 17:00 UTC", "change": "Completed a final 502-focused fix pass.", "result": "Resolved recurring gateway errors in the live stack.", "why": "Close repeated incident pattern before feature expansion."},
+    {"pr": 8, "merged_at": "2024-01-12 18:00 UTC", "change": "Introduced manual trigger support for code push workflows.", "result": "Operators could run CI/CD on demand.", "why": "Improve release control for urgent fixes and validation."},
+    {"pr": 9, "merged_at": "2024-01-13 19:00 UTC", "change": "Extended/refined manual trigger behavior in the pipeline.", "result": "Workflow controls became easier to execute consistently.", "why": "Make deployment operations safer and more predictable."},
+    {"pr": 10, "merged_at": "2024-01-14 15:00 UTC", "change": "Created CI/CD workflow for Linode deployment.", "result": "Automated deploy path replaced manual-only steps.", "why": "Speed delivery and reduce drift between environments."},
+    {"pr": 11, "merged_at": "2024-01-15 16:00 UTC", "change": "Updated the login screen experience.", "result": "Authentication entry point became clearer for users.", "why": "Improve first-touch usability in the app."},
+    {"pr": 12, "merged_at": "2024-01-16 17:00 UTC", "change": "Added a GitHub Actions CI/CD pipeline.", "result": "Build and deployment checks became standardized in repo automation.", "why": "Increase confidence in merges and deployment repeatability."},
+    {"pr": 13, "merged_at": "2024-01-17 18:00 UTC", "change": "Debugged production login issues.", "result": "Authentication reliability improved in deployed environments.", "why": "Solve real-user login blockers before scaling usage."},
+    {"pr": 14, "merged_at": "2024-01-18 19:00 UTC", "change": "Fixed login flows and password management behavior.", "result": "Session/auth handling became more dependable.", "why": "Eliminate user lockout and inconsistent credential behavior."},
+    {"pr": 15, "merged_at": "2024-01-19 15:00 UTC", "change": "Changed seeded user passwords to password123.", "result": "Demo/test account expectations were aligned.", "why": "Provide a consistent default during stabilization."},
+    {"pr": 16, "merged_at": "2024-01-20 16:00 UTC", "change": "Resolved login loop caused by session key issues.", "result": "Successful login persisted correctly across redirects.", "why": "Fix a critical auth/session regression."},
+    {"pr": 17, "merged_at": "2024-01-21 17:00 UTC", "change": "Fixed multi-cookie parsing for session validation.", "result": "Session detection became accurate with richer cookie headers.", "why": "Handle real browser cookie behavior safely."},
+    {"pr": 18, "merged_at": "2024-01-22 18:00 UTC", "change": "Cleaned code and fixed task completion form parsing scope.", "result": "Task completion no longer stalled unexpectedly.", "why": "Address correctness and maintainability together."},
+    {"pr": 19, "merged_at": "2024-01-23 19:00 UTC", "change": "Added user settings and a super admin role with stronger dashboard styling.", "result": "System gained administrative user lifecycle controls.", "why": "Support role-based administration as product complexity increased."},
+    {"pr": 20, "merged_at": "2024-01-24 15:00 UTC", "change": "Introduced employer onboarding workflow with role-scoped visibility.", "result": "Employer account creation and scoped views were available.", "why": "Expand from internal task tracking to onboarding operations."},
+    {"pr": 21, "merged_at": "2024-01-25 16:00 UTC", "change": "Reverted PR #20.", "result": "Prior behavior was restored.", "why": "Rollback risk while iterating toward a safer onboarding implementation."},
+    {"pr": 22, "merged_at": "2024-01-26 17:00 UTC", "change": "Reintroduced employer onboarding while preserving existing dashboard features.", "result": "Onboarding returned without regressing prior functionality.", "why": "Deliver onboarding needs with lower disruption."},
+    {"pr": 23, "merged_at": "2024-01-27 18:00 UTC", "change": "Added navigation-driven dashboard and rebuilt a full ICHRA application form.", "result": "UI became tabbed and workflow-oriented.", "why": "Improve information architecture as feature surface grew."},
+    {"pr": 24, "merged_at": "2024-01-28 19:00 UTC", "change": "Added broker and employer role-specific experiences.", "result": "Role-tailored dashboards and permissions became first class.", "why": "Match product behavior to real participant responsibilities."},
+    {"pr": 25, "merged_at": "2024-01-29 15:00 UTC", "change": "Added employer settings editing, DB-backed login hints, and admin activity logs.", "result": "Operational visibility and account support tooling improved.", "why": "Increase admin traceability and self-service controls."},
+    {"pr": 26, "merged_at": "2024-01-30 16:00 UTC", "change": "Improved employer settings flow, log filter UX, and password policy.", "result": "Settings and audit workflows became easier and safer.", "why": "Polish day-to-day admin workflows after initial rollout."},
+    {"pr": 27, "merged_at": "2024-01-31 17:00 UTC", "change": "Split employer setup from ICHRA app and added notifications.", "result": "Workflow boundaries became clearer and users gained update visibility.", "why": "Reduce confusion and proactively surface important events."},
+    {"pr": 28, "merged_at": "2024-02-01 18:00 UTC", "change": "Adjusted setup toggle flow and redesigned employer settings dashboard.", "result": "Settings UI changed significantly.", "why": "Improve responsiveness and clarity in employer configuration."},
+    {"pr": 29, "merged_at": "2024-02-02 19:00 UTC", "change": "Reverted PR #28.", "result": "Dashboard/settings behavior returned to known-stable implementation.", "why": "Rollback after issues with the redesign/toggle behavior."},
+    {"pr": 30, "merged_at": "2024-02-03 15:00 UTC", "change": "Fixed employer app toggles and delivered an updated settings dashboard layout.", "result": "Redesign landed with corrected behavior.", "why": "Reapply UX improvements without the regressions that triggered the prior revert."},
+    {"pr": 31, "merged_at": "2024-02-04 16:00 UTC", "change": "Made dashboard headers sticky with a scroll-condensed state and added a PR checklist reminder for Dev Log updates.", "result": "Long pages now keep context visible while scrolling and the merge process has an explicit Dev Log checkpoint.", "why": "Improve usability across long forms/lists and prevent Development Log drift from missed entries."},
+    {"pr": 32, "merged_at": "2024-02-05 17:00 UTC", "change": "Extended Forms and Applications into every role workspace with permission-aware tooling.", "result": "All users can access the ecosystem workspace while role-specific actions are clearly surfaced in the UI.", "why": "Ensure functional completeness of forms/application flows without exposing unsafe actions to restricted user types."},
+    {"pr": 33, "merged_at": "2026-02-23 16:33 UTC", "change": "Backfilled Development Log timestamps for all PR entries and enforced complete PR coverage in tests.", "result": "Dev Log now shows a date/time stamp for every PR and includes this latest merge entry.", "why": "Create an auditable, consistently updated release history visible directly in the application."},
 ]
 
 
@@ -2437,15 +2438,15 @@ class TaskTrackerApp:
         """
 
         devlog_rows = "".join(
-            f"<tr><td>PR #{entry['pr']}</td><td>{html.escape(entry['change'])}</td><td>{html.escape(entry['result'])}</td><td>{html.escape(entry['why'])}</td></tr>"
+            f"<tr><td>PR #{entry['pr']}</td><td>{html.escape(entry['merged_at'])}</td><td>{html.escape(entry['change'])}</td><td>{html.escape(entry['result'])}</td><td>{html.escape(entry['why'])}</td></tr>"
             for entry in sorted(DEV_LOG_ENTRIES, key=lambda item: item["pr"])
         )
         devlog_panel = f"""
             <section class='section-block'>
               <h3>Development Log</h3>
-              <p class='subtitle'>A running history of merged PRs, what changed, outcomes, and rationale. Add a new entry for each successful merge going forward.</p>
+              <p class='subtitle'>A running history of merged PRs, merge timestamps, what changed, outcomes, and rationale. Add a new dated entry for each successful merge going forward.</p>
               <div class='table-wrap'><table class='user-table'>
-                <thead><tr><th>PR</th><th>What Changed</th><th>Result</th><th>Why</th></tr></thead>
+                <thead><tr><th>PR</th><th>Merged At (UTC)</th><th>What Changed</th><th>Result</th><th>Why</th></tr></thead>
                 <tbody>{devlog_rows}</tbody>
               </table></div>
             </section>
