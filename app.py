@@ -430,6 +430,9 @@ class TaskTrackerApp:
         if path == "/signup" and method == "POST":
             return self.handle_public_employer_signup(start_response, self.parse_form(environ))
 
+        if path == "/signup/broker" and method == "POST":
+            return self.handle_public_broker_signup(start_response, self.parse_form(environ))
+
         if path == "/logout" and method == "POST":
             return self.handle_logout(start_response)
 
@@ -1305,7 +1308,7 @@ class TaskTrackerApp:
 
     def create_user(self, username: str, password: str, role: str, created_by_user_id: int | None = None, team_id: int | None = None):
         db = self.db()
-        is_team_admin = 1 if role == "broker" and db.execute(
+        is_team_admin = 1 if role == "broker" and team_id is not None and db.execute(
             "SELECT 1 FROM users WHERE role = 'broker' AND team_id = ? AND is_team_admin = 1 AND is_active = 1",
             (team_id,),
         ).fetchone() is None else 0
@@ -1334,6 +1337,26 @@ class TaskTrackerApp:
         seed = "".join(ch for ch in legal_name.lower() if ch.isalnum())[:12] or "employer"
         count = db.execute("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?", (f"{seed}%",)).fetchone()["n"]
         return f"{seed}{count + 1}"
+
+    def build_broker_username(self, db, brokerage_name: str) -> str:
+        seed = "".join(ch for ch in brokerage_name.lower() if ch.isalnum())[:12] or "broker"
+        count = db.execute("SELECT COUNT(*) AS n FROM users WHERE username LIKE ?", (f"{seed}%",)).fetchone()["n"]
+        return f"{seed}{count + 1}"
+
+    def create_public_broker(self, form: dict[str, str]) -> str:
+        db = self.db()
+        username = self.build_broker_username(db, form["brokerage_name"])
+        display_name = form["contact_name"].strip() or form["brokerage_name"].strip()
+        db.execute(
+            """
+            INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin)
+            VALUES (?, ?, ?, ?, 'broker', 1, 1, NULL, 0)
+            """,
+            (username, display_name, hash_password("user"), "user"),
+        )
+        db.commit()
+        db.close()
+        return username
 
     def create_employer(self, creator_user_id: int, form: dict[str, str], broker_user_id: int | None = None) -> str:
         db = self.db()
@@ -1839,6 +1862,24 @@ class TaskTrackerApp:
             flash=("success", "Employer request submitted. Use provided portal credentials after ICHRA setup is completed."),
         )
 
+    def handle_public_broker_signup(self, start_response, form):
+        form["brokerage_name"] = form.get("brokerage_name", "")
+        form["contact_name"] = form.get("contact_name", "")
+        form["work_email"] = form.get("work_email", "")
+        form["phone"] = form.get("phone", "") or "Not provided"
+
+        required = ["brokerage_name", "contact_name", "work_email"]
+        if any(not form.get(name, "").strip() for name in required):
+            return self.redirect(start_response, "/login", flash=("error", "Please complete brokerage name, contact, and email."))
+
+        username = self.create_public_broker(form)
+        self.log_action(None, "broker_signup_requested", "user", None, form["brokerage_name"].strip(), f"username={username};email={form['work_email'].strip().lower()};phone={form['phone'].strip()}")
+        return self.redirect(
+            start_response,
+            "/login",
+            flash=("success", f"Broker setup submitted. Portal username: {username}, temporary password: user. Admin assigns teams after review."),
+        )
+
     def handle_mark_notification_seen(self, start_response, session_user, form):
         try:
             notification_id = int(form.get("notification_id", ""))
@@ -2014,7 +2055,7 @@ class TaskTrackerApp:
             for row in demo_accounts
         )
         html_body = self.flash_html(flash_message) + f"""
-            <section class="card auth-card app-shell vibe-orbit">
+            <section class="card auth-card vibe-orbit">
               <header class='app-header'>
                 <div>
                   <p class="eyebrow">Monolith Flow</p>
@@ -2033,24 +2074,27 @@ class TaskTrackerApp:
                 <ul class='status-list compact-list'>{demo_rows or '<li>No active users found.</li>'}</ul>
               </section>
               <section class="section-block panel-card welcome-panel">
-                <h3>First time employer?</h3>
-                <p class="subtitle">Open the 30-second intake and get a pre-built onboarding workspace.</p>
-                <button type="button" class="secondary" data-modal-open="new-employer-modal">Open New Employer Setup</button>
+                <h3>First time here?</h3>
+                <p class="subtitle">Start a public setup form. New brokers and employers remain unassigned until an admin places them on a team.</p>
+                <button type="button" class="secondary" data-modal-open="public-setup-modal">Open Setup Form</button>
               </section>
             </section>
-            <div class="modal" id="new-employer-modal" aria-hidden="true">
-              <div class="modal-backdrop" data-modal-close="new-employer-modal"></div>
+            <div class="modal" id="public-setup-modal" aria-hidden="true">
+              <div class="modal-backdrop" data-modal-close="public-setup-modal"></div>
               <section class="modal-card card">
-                <button type="button" class="modal-close" aria-label="Close" data-modal-close="new-employer-modal">×</button>
+                <button type="button" class="modal-close" aria-label="Close" data-modal-close="public-setup-modal">×</button>
                 <p class="eyebrow">Quick intake</p>
-                <h2>Prospective Employer Sign Up</h2>
-                <form method="post" action="/signup" class="form-grid">
-                  <label>Employer Legal Name <input type="text" name="legal_name" required /></label>
-                  <label>Contact Name <input type="text" name="prospect_name" required /></label>
-                  <label>Work Email <input type="email" name="prospect_email" required /></label>
-                  <label>Phone <input type="text" name="prospect_phone" /></label>
-                  <button type="submit">Submit Employer Request</button>
-                </form>
+                <h2>New Setup Forms</h2>
+                <div class='setup-toggle-row'>
+                  <button type='button' class='secondary setup-toggle active' data-setup-mode='employer'>New Employer Setup Form</button>
+                  <button type='button' class='secondary setup-toggle' data-setup-mode='broker'>New Broker Setup Form</button>
+                </div>
+                <div class='setup-panel' data-panel-mode='employer'>
+                  {self.render_new_employer_setup_form()}
+                </div>
+                <div class='setup-panel' data-panel-mode='broker' hidden>
+                  {self.render_new_broker_setup_form()}
+                </div>
               </section>
             </div>
             """
@@ -2838,7 +2882,7 @@ class TaskTrackerApp:
 
     def render_new_employer_setup_form(self):
         return """
-        <section class='section-block panel-card'>
+        <section class='section-block panel-card public-setup-card'>
           <h3>New Employer Setup Form</h3>
           <p class='subtitle'>This is the same intake form available on the login page as the public entry point for new employers.</p>
           <form method='post' action='/signup' class='form-grid'>
@@ -2847,6 +2891,21 @@ class TaskTrackerApp:
             <label>Work Email <input type='email' name='prospect_email' required /></label>
             <label>Phone <input type='text' name='prospect_phone' /></label>
             <button type='submit'>Submit Employer Request</button>
+          </form>
+        </section>
+        """
+
+    def render_new_broker_setup_form(self):
+        return """
+        <section class='section-block panel-card public-setup-card'>
+          <h3>New Broker Setup Form</h3>
+          <p class='subtitle'>Public entry point for prospective brokers. Brokers can create employers after login, and admins assign teams afterward.</p>
+          <form method='post' action='/signup/broker' class='form-grid'>
+            <label>Brokerage Name <input type='text' name='brokerage_name' required /></label>
+            <label>Contact Name <input type='text' name='contact_name' required /></label>
+            <label>Work Email <input type='email' name='work_email' required /></label>
+            <label>Phone <input type='text' name='phone' /></label>
+            <button type='submit'>Submit Broker Request</button>
           </form>
         </section>
         """
