@@ -2107,6 +2107,110 @@ class TaskTrackerApp:
         start_response("200 OK", headers)
         return [html_doc.encode("utf-8")]
 
+    def render_permissions_panel(self):
+        matrix_rows = [
+            (
+                "Account lifecycle management",
+                "Can create/update admin, broker, and employer users across teams (except other super admins).",
+                "Can create/update admin, broker, and employer users only inside their assigned team.",
+                "Can create/update broker and employer users only inside their assigned team.",
+                "Can only update their own profile and password.",
+            ),
+            (
+                "Employer portfolio visibility",
+                "Sees all employers plus active/inactive account scopes.",
+                "Sees employers owned directly or connected through same team relationships.",
+                "Sees only employers assigned to that broker.",
+                "Sees only the employer record linked to their own user account.",
+            ),
+            (
+                "ICHRA Setup Workspace",
+                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
+                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
+                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
+                "Can view/edit only their own application; cannot open the new employer setup form.",
+            ),
+            (
+                "Team administration",
+                "Can create teams and assign the single broker team admin per team.",
+                "Can view team workspace but cannot assign broker team admins.",
+                "Can view team workspace but cannot assign broker team admins.",
+                "Read-only team awareness; no team administration actions.",
+            ),
+            (
+                "Team task engine",
+                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
+                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
+                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
+                "No task assignment privileges.",
+            ),
+            (
+                "Notifications",
+                "Can send notifications to manageable users and review own inbox.",
+                "Can send notifications to manageable users and review own inbox.",
+                "Inbox only.",
+                "Inbox only.",
+            ),
+            (
+                "Activity Log visibility",
+                "Full access to the Activity Log view.",
+                "No Activity Log tab.",
+                "No Activity Log tab.",
+                "No Activity Log tab.",
+            ),
+        ]
+
+        table_rows = "".join(
+            """
+            <tr>
+              <td><strong>{area}</strong></td>
+              <td>{super_admin}</td>
+              <td>{admin}</td>
+              <td>{broker}</td>
+              <td>{employer}</td>
+            </tr>
+            """.format(
+                area=html.escape(area),
+                super_admin=html.escape(super_admin),
+                admin=html.escape(admin),
+                broker=html.escape(broker),
+                employer=html.escape(employer),
+            )
+            for area, super_admin, admin, broker, employer in matrix_rows
+        )
+
+        return f"""
+          <section class='section-block panel-card'>
+            <h3>Permissions and Access Control Baseline</h3>
+            <p class='subtitle'>This page documents the effective authorization behavior implemented in the running app (role checks, team scoping, and view-level constraints). Use it as the source-of-truth reference for support, security reviews, and operational runbooks.</p>
+            <div class='table-wrap'>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Capability Area</th>
+                    <th>Super Admin</th>
+                    <th>Admin</th>
+                    <th>Broker</th>
+                    <th>Employer</th>
+                  </tr>
+                </thead>
+                <tbody>{table_rows}</tbody>
+              </table>
+            </div>
+          </section>
+          <section class='section-block panel-card'>
+            <h3>Operational Rules in Effect (DevOps Notes)</h3>
+            <ul class='status-list'>
+              <li><strong>Role hierarchy:</strong> <code>super_admin &gt; admin &gt; broker &gt; employer</code>. Hierarchy drives create/update enforcement to prevent upward privilege escalation.</li>
+              <li><strong>Team boundary:</strong> Most management actions require actor and target to share a team ID. This is the primary multi-tenant guardrail for admin and broker accounts.</li>
+              <li><strong>Single broker admin per team:</strong> The broker-team-admin designation is singleton per team and can only be reassigned by a super admin.</li>
+              <li><strong>Employer account model:</strong> Employer identities are read-only from the employer perspective and are intended to be managed by upstream operations roles.</li>
+              <li><strong>Application lock model:</strong> Submitted ICHRA applications become token-locked until an operations role renews access, enabling controlled post-submit edits.</li>
+              <li><strong>Logs and observability:</strong> The Activity Log view is intentionally restricted to super admin while action events continue to be recorded for operations auditing.</li>
+            </ul>
+          </section>
+        """
+
     def render_dashboard(self, start_response, user, flash_message, active_view="dashboard", query=None):
         query = query or {}
         role = user["role"]
@@ -2181,6 +2285,7 @@ class TaskTrackerApp:
             nav_links.insert(1, ("application", "ICHRA Setup Workspace"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
+        nav_links.append(("permissions", "Permissions"))
         if show_settings:
             nav_links.append(("settings", "Settings"))
         if show_logs:
@@ -2706,6 +2811,7 @@ class TaskTrackerApp:
             "history": notifications_panel,
             "notifications": notifications_panel,
             "profile": profile_panel,
+            "permissions": self.render_permissions_panel(),
             "devlog": devlog_panel,
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",

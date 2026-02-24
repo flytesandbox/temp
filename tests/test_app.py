@@ -141,6 +141,27 @@ class AppTests(unittest.TestCase):
         self.assertTrue(prs, "Expected at least one PR entry in the development log")
         self.assertEqual(prs, list(range(1, prs[-1] + 1)))
         self.assertRegex(dashboard["body"], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC")
+
+    def test_permissions_tab_is_visible_in_main_nav(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertIn("href='/?view=permissions'", dashboard["body"])
+        self.assertIn(">Permissions</a>", dashboard["body"])
+
+    def test_permissions_view_displays_permission_matrix_and_devops_rules(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        permissions = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=permissions")
+        self.assertIn("Permissions and Access Control Baseline", permissions["body"])
+        self.assertIn("Capability Area", permissions["body"])
+        self.assertIn("Team boundary", permissions["body"])
+        self.assertIn("single broker admin per team", permissions["body"].lower())
+
     def test_login_required_redirects_to_login(self):
         response = call_app(self.app, method="GET", path="/")
         self.assertTrue(response["status"].startswith("302"))
