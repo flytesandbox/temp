@@ -682,8 +682,10 @@ class AppTests(unittest.TestCase):
         self.assertIn("admin", login_page["body"])
         self.assertIn("brokerx", login_page["body"])
         self.assertIn("alex", login_page["body"])
-        self.assertIn("Open New Employer Setup", login_page["body"])
-        self.assertIn("new-employer-modal", login_page["body"])
+        self.assertIn("Open Setup Form", login_page["body"])
+        self.assertIn("public-setup-modal", login_page["body"])
+        self.assertIn("New Employer Setup Form", login_page["body"])
+        self.assertIn("New Broker Setup Form", login_page["body"])
 
     def test_application_view_renders_application_workspace(self):
         cookie = ""
@@ -733,6 +735,23 @@ class AppTests(unittest.TestCase):
         self.assertIsNotNone(employer)
         self.assertIsNotNone(employer["primary_user_id"])
         db.close()
+
+
+    def test_public_broker_signup_creates_unassigned_broker(self):
+        response = call_app(
+            self.app,
+            method="POST",
+            path="/signup/broker",
+            body="brokerage_name=Public+Brokerage&contact_name=Taylor&work_email=taylor%40broker.com&phone=555",
+        )
+        self.assertEqual(dict(response["headers"]).get("Location"), "/login")
+
+        db = self.app.db()
+        broker = db.execute("SELECT username, role, team_id FROM users WHERE display_name = 'Taylor' AND role = 'broker' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+        self.assertIsNotNone(broker)
+        self.assertEqual(broker["role"], "broker")
+        self.assertIsNone(broker["team_id"])
 
     def test_notifications_view_supports_mark_seen(self):
         cookie = ""
