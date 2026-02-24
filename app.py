@@ -901,9 +901,10 @@ class TaskTrackerApp:
             rows = db.execute(
                 """
                 SELECT e.*, u.username AS portal_username,
+                       COALESCE(u.is_active, 0) AS portal_user_is_active,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 ORDER BY e.created_at DESC
                 """
@@ -912,9 +913,10 @@ class TaskTrackerApp:
             rows = db.execute(
                 """
                 SELECT e.*, u.username AS portal_username,
+                       COALESCE(u.is_active, 0) AS portal_user_is_active,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id AND owner_admin.is_active = 1
                 LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id AND employer_user.is_active = 1
@@ -933,9 +935,10 @@ class TaskTrackerApp:
             rows = db.execute(
                 """
                 SELECT e.*, u.username AS portal_username,
+                       COALESCE(u.is_active, 0) AS portal_user_is_active,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 WHERE e.broker_user_id = ?
                 ORDER BY e.created_at DESC
@@ -946,9 +949,10 @@ class TaskTrackerApp:
             rows = db.execute(
                 """
                 SELECT e.*, u.username AS portal_username,
+                       COALESCE(u.is_active, 0) AS portal_user_is_active,
                        broker.username AS broker_username
                 FROM employers e
-                JOIN users u ON u.id = e.linked_user_id AND u.is_active = 1
+                LEFT JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
                 WHERE e.linked_user_id = ?
                 ORDER BY e.created_at DESC
@@ -2116,23 +2120,38 @@ class TaskTrackerApp:
         team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
 
         employers = self.list_visible_employers(user)
+        employers_scope = query.get("employers_scope", ["active"])[0] if query else "active"
+        if employers_scope not in {"active", "all", "inactive"}:
+            employers_scope = "active"
+        if role == "employer":
+            visible_employer_rows = employers
+        elif employers_scope == "all":
+            visible_employer_rows = employers
+        elif employers_scope == "inactive":
+            visible_employer_rows = [row for row in employers if not row["portal_user_is_active"]]
+        else:
+            visible_employer_rows = [row for row in employers if row["portal_user_is_active"]]
+
+        active_employer_count = sum(1 for row in employers if row["portal_user_is_active"])
+        inactive_employer_count = len(employers) - active_employer_count
         employer_rows = "".join(
             f"""
             <tr>
               <td>{html.escape(row['legal_name'])}</td>
               <td>{html.escape(row['contact_name'])}</td>
               <td>{html.escape(row['work_email'])}</td>
-              <td>{html.escape(row['portal_username'])}</td>
+              <td>{html.escape(row['portal_username'] or 'N/A')}</td>
               <td>{html.escape(row['broker_username'] or 'Unassigned')}</td>
+              <td>{'Active' if row['portal_user_is_active'] else 'Inactive'}</td>
               <td>{application_status_label(row['ichra_started'], row['application_complete'])}</td>
               <td>{html.escape(row['onboarding_task'])}</td>
               <td>{self.render_employer_settings_link(row, role)}</td>
             </tr>
             """
-            for row in employers
+            for row in visible_employer_rows
         )
         if not employer_rows:
-            employer_rows = "<tr><td colspan='8'>No employers available for this account yet.</td></tr>"
+            employer_rows = "<tr><td colspan='9'>No employers available for this account yet.</td></tr>"
         role_title = {
             "super_admin": "Admin Operations Dashboard",
             "broker": "Broker Portfolio Dashboard",
@@ -2411,8 +2430,9 @@ class TaskTrackerApp:
         employers_panel = f"""
             <section class='section-block'>
               <h3>{'My ICHRA Setup Application' if role == 'employer' else 'Employer Accounts'}</h3>
+              {"" if role == "employer" else f"<p class='subtitle'>Showing <strong>{len(visible_employer_rows)}</strong> of <strong>{len(employers)}</strong> scoped employers. Active portal accounts: <strong>{active_employer_count}</strong> · Inactive portal accounts: <strong>{inactive_employer_count}</strong>.</p><nav class='sub-nav dashboard-nav'><a class='nav-link {'active' if employers_scope == 'active' else ''}' href='/?view=employers&employers_scope=active'>Active</a><a class='nav-link {'active' if employers_scope == 'inactive' else ''}' href='/?view=employers&employers_scope=inactive'>Inactive</a><a class='nav-link {'active' if employers_scope == 'all' else ''}' href='/?view=employers&employers_scope=all'>All</a></nav>"}
               <div class='table-wrap'><table class='user-table'>
-                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Application</th><th>Assigned Task</th><th>Settings</th></tr></thead>
+                <thead><tr><th>Employer</th><th>Contact</th><th>Email</th><th>Portal Username</th><th>Broker Owner</th><th>Portal Status</th><th>Application</th><th>Assigned Task</th><th>Settings</th></tr></thead>
                 <tbody>{employer_rows}</tbody>
               </table></div>
             </section>

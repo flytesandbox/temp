@@ -532,6 +532,49 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("Broker A Client", broker_b_view["body"])
 
 
+
+    def test_super_admin_employers_view_supports_active_inactive_scopes(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Visible+Active&contact_name=Nova&work_email=nova%40active.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Factive.com&state=WA"
+            ),
+            cookie_header=cookie,
+        )
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Hidden+Inactive&contact_name=Rowan&work_email=rowan%40inactive.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Finactive.com&state=OR"
+            ),
+            cookie_header=cookie,
+        )
+
+        db = self.app.db()
+        db.execute(
+            "UPDATE users SET is_active = 0 WHERE id = (SELECT linked_user_id FROM employers WHERE legal_name = 'Hidden Inactive')"
+        )
+        db.commit()
+        db.close()
+
+        active_view = call_app(self.app, method="GET", path="/", query_string="view=employers&employers_scope=active", cookie_header=cookie)
+        self.assertIn("Visible Active", active_view["body"])
+        self.assertNotIn("Hidden Inactive", active_view["body"])
+
+        all_view = call_app(self.app, method="GET", path="/", query_string="view=employers&employers_scope=all", cookie_header=cookie)
+        self.assertIn("Visible Active", all_view["body"])
+        self.assertIn("Hidden Inactive", all_view["body"])
+        self.assertIn("Portal Status", all_view["body"])
+        self.assertIn(">Inactive<", all_view["body"])
+
     def test_employer_application_status_shows_not_started_before_ichra(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
@@ -686,6 +729,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("public-setup-modal", login_page["body"])
         self.assertIn("New Employer Setup Form", login_page["body"])
         self.assertIn("New Broker Setup Form", login_page["body"])
+        self.assertIn("setup-toggle active", login_page["body"])
 
     def test_application_view_renders_application_workspace(self):
         cookie = ""
