@@ -1,4 +1,5 @@
 import io
+import json
 import re
 from http import cookies
 from pathlib import Path
@@ -248,7 +249,7 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=teambroker&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
-    def test_broker_can_create_broker_and_employer_but_not_admin(self):
+    def test_broker_can_create_employer_but_not_admin_or_broker(self):
         admin_cookie = ""
         login_admin = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
@@ -275,14 +276,14 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(dict(denied["headers"]).get("Location"), "/")
 
-        allowed_broker = call_app(
+        denied_broker = call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
             body="username=brokerpeer&role=broker",
             cookie_header=broker_cookie,
         )
-        self.assertEqual(dict(allowed_broker["headers"]).get("Location"), "/")
+        self.assertEqual(dict(denied_broker["headers"]).get("Location"), "/")
 
         allowed_employer = call_app(
             self.app,
@@ -292,6 +293,19 @@ class AppTests(unittest.TestCase):
             cookie_header=broker_cookie,
         )
         self.assertEqual(dict(allowed_employer["headers"]).get("Location"), "/")
+
+
+    def test_effective_access_endpoint_returns_capability_payload(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        response = call_app(self.app, method="GET", path="/me/access", cookie_header=cookie)
+        self.assertTrue(response["status"].startswith("200"))
+        payload = json.loads(response["body"])
+        self.assertEqual(payload["role"], "admin")
+        self.assertIn("team.user_admin", payload["capabilities"])
+        self.assertTrue(payload["capabilities"]["team.user_admin"])
 
     def test_team_has_single_broker_team_admin_and_can_be_reassigned(self):
         cookie = ""

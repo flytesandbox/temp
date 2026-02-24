@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import html
+import json
 import os
 import sqlite3
 from http import cookies
@@ -16,6 +17,13 @@ PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 ALLOWED_THEMES = {"default", "sunset", "midnight", "dawn", "mint", "lavender"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
 ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
+CAPABILITY_KEYS = {
+    "platform.audit_view_all",
+    "team.audit_view",
+    "team.user_admin",
+    "team.staff_provision",
+    "employer.user_admin",
+}
 
 
 def application_status_label(ichra_started: int, application_complete: int) -> str:
@@ -90,6 +98,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 55, "merged_at": "2026-02-23 10:47 UTC", "change": "Updated Development Log process expectations for every PR.", "result": "Release history policy became explicit in merge-time workflow.", "why": "Prevent missing PR entries and maintain audit completeness."},
     {"pr": 56, "merged_at": "2026-02-23 11:02 UTC", "change": "Restricted broker user creation and added team broker admin controls.", "result": "Broker provisioning now follows role-safe rules with team-level governance.", "why": "Tighten permissions and prevent unauthorized account escalation."},
     {"pr": 57, "merged_at": "2026-02-23 11:04 UTC", "change": "Reverted PR #54 navigation rollback changes.", "result": "Navigation behavior returned to the redesigned implementation after revert validation.", "why": "Reprocess the navigation decision path to restore intended UX direction."},
+    {"pr": 58, "merged_at": "2026-02-24 17:20 UTC", "change": "Introduced capability-scoped access payloads, tightened broker provisioning, and added team-scoped audit visibility.", "result": "Permission checks are clearer, UI can pre-render authorized actions, and operational auditing is delegated safely.", "why": "Scale the permission model with explicit capabilities and stronger tenant-safe guardrails."},
 ]
 
 
@@ -449,6 +458,14 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/login")
             return self.render_dashboard(start_response, session_user, self.consume_flash(cookie), query.get("view", ["dashboard"])[0], query)
 
+        if path == "/me/access" and method == "GET":
+            if not session_user:
+                start_response("401 Unauthorized", [("Content-Type", "application/json")])
+                return [json.dumps({"error": "Authentication required."}).encode("utf-8")]
+            payload = self.build_effective_access_payload(session_user)
+            start_response("200 OK", [("Content-Type", "application/json")])
+            return [json.dumps(payload).encode("utf-8")]
+
         if path == "/login" and method == "GET":
             return self.render_login(start_response, self.consume_flash(cookie))
 
@@ -661,6 +678,53 @@ class TaskTrackerApp:
         db.close()
         return user
 
+    def capability_flags_for_user(self, user):
+        flags = {key: False for key in CAPABILITY_KEYS}
+        if not user or not user["is_active"]:
+            return flags
+        role = user["role"]
+        if role == "super_admin":
+            for key in flags:
+                flags[key] = True
+            return flags
+        if role in {"admin", "broker"} and user["is_team_super_admin"] == 1:
+            flags["team.user_admin"] = True
+            flags["team.staff_provision"] = True
+            flags["team.audit_view"] = True
+            flags["employer.user_admin"] = True
+            return flags
+        if role == "admin":
+            flags["team.user_admin"] = True
+            flags["team.staff_provision"] = True
+            flags["team.audit_view"] = True
+            flags["employer.user_admin"] = True
+        elif role == "broker":
+            flags["team.audit_view"] = True
+            flags["employer.user_admin"] = True
+        elif role == "employer":
+            flags["employer.user_admin"] = True
+        return flags
+
+    def build_effective_access_payload(self, user):
+        employers = self.list_visible_employers(user)
+        team_memberships = []
+        if user["team_id"] is not None:
+            team_memberships.append({
+                "team_id": user["team_id"],
+                "role": user["role"],
+                "is_team_super_admin": bool(user["is_team_super_admin"]),
+            })
+        assigned_employer_ids = [row["id"] for row in employers if user["role"] == "broker"]
+        employer_membership_ids = [row["id"] for row in employers if user["role"] == "employer"]
+        return {
+            "user_id": user["id"],
+            "role": user["role"],
+            "capabilities": self.capability_flags_for_user(user),
+            "team_memberships": team_memberships,
+            "employer_memberships": employer_membership_ids,
+            "assigned_employer_ids": assigned_employer_ids,
+        }
+
     def get_users_with_completion(self, session_user=None):
         db = self.db()
         rows = db.execute(
@@ -755,6 +819,11 @@ class TaskTrackerApp:
             where.append("(LOWER(l.target_label) LIKE ? OR LOWER(l.details) LIKE ? OR LOWER(COALESCE(actor.username, 'system')) LIKE ?)")
             pattern = f"%{search}%"
             params.extend([pattern, pattern, pattern])
+
+        team_id = filters.get("team_id", [""])[0]
+        if team_id:
+            where.append("(actor.team_id = ? OR l.entity_type = 'team' AND l.entity_id = ?)")
+            params.extend([team_id, team_id])
 
         sql = """
             SELECT l.*, COALESCE(actor.username, 'system') AS actor_username, COALESCE(actor.role, 'system') AS actor_role
@@ -1062,12 +1131,13 @@ class TaskTrackerApp:
     def can_manage_user(self, session_user, target_user):
         if not target_user or not target_user["is_active"]:
             return False
+        capabilities = self.capability_flags_for_user(session_user)
         if session_user["role"] == "super_admin":
             return target_user["role"] != "super_admin"
-        if self.is_team_super_admin_user(session_user):
+        if capabilities["team.user_admin"]:
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         if session_user["role"] == "broker":
-            return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"broker", "employer"}
+            return target_user["team_id"] == session_user["team_id"] and target_user["role"] == "employer"
         if session_user["role"] == "admin":
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         return target_user["id"] == session_user["id"]
@@ -1705,9 +1775,14 @@ class TaskTrackerApp:
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
+        capabilities = self.capability_flags_for_user(session_user)
+        if session_user["role"] == "broker" and not capabilities["team.staff_provision"] and role != "employer":
+            return self.redirect(start_response, "/", flash=("error", "Brokers can only create employer users assigned to their team scope."))
+        if role in {"admin", "broker"} and not capabilities["team.staff_provision"]:
+            return self.redirect(start_response, "/", flash=("error", "You do not have permission to provision team staff users."))
+        if role == "employer" and not capabilities["employer.user_admin"]:
+            return self.redirect(start_response, "/", flash=("error", "You do not have permission to provision employer users."))
         is_team_super_admin = self.is_team_super_admin_user(session_user)
-        if session_user["role"] == "broker" and not is_team_super_admin and role not in {"broker", "employer"}:
-            return self.redirect(start_response, "/", flash=("error", "Brokers can only create broker or employer users."))
         creator_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         role_level = ROLE_LEVELS.get(role, -1)
         if role_level < 0:
@@ -1741,11 +1816,14 @@ class TaskTrackerApp:
         role = form.get("role", "admin")
         password = form.get("password", "")
         is_active = 1 if form.get("is_active", "1") == "1" else 0
+        capabilities = self.capability_flags_for_user(session_user)
         is_team_super_admin = self.is_team_super_admin_user(session_user)
         actor_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         target_level = ROLE_LEVELS.get(role, -1)
-        if session_user["role"] == "broker" and not is_team_super_admin and role not in {"broker", "employer"}:
-            return self.redirect(start_response, "/", flash=("error", "Brokers can only manage broker or employer users."))
+        if session_user["role"] == "broker" and not capabilities["team.staff_provision"] and role != "employer":
+            return self.redirect(start_response, "/", flash=("error", "Brokers can only manage employer users."))
+        if role in {"admin", "broker"} and not capabilities["team.staff_provision"]:
+            return self.redirect(start_response, "/", flash=("error", "You do not have permission to manage team staff users."))
         if target_level < 0:
             return self.redirect(start_response, "/", flash=("error", "Invalid role selected."))
         if (session_user["role"] != "broker" or not is_team_super_admin) and target_level >= actor_level:
@@ -2223,50 +2301,36 @@ class TaskTrackerApp:
             (
                 "Account lifecycle management",
                 "Can create/update admin, broker, and employer users across teams (except other super admins).",
-                "Can create/update admin, broker, and employer users only inside their assigned team.",
-                "Can create/update broker and employer users only inside their assigned team.",
+                "Can create/update admin, broker, and employer users inside their assigned team.",
+                "Can create/update employer users only inside their assigned team; cannot provision broker peers.",
                 "Can only update their own profile and password.",
             ),
             (
                 "Employer portfolio visibility",
                 "Sees all employers plus active/inactive account scopes.",
-                "Sees employers owned directly or connected through same team relationships.",
+                "Sees employers in the same team scope.",
                 "Sees only employers assigned to that broker.",
                 "Sees only the employer record linked to their own user account.",
             ),
             (
                 "ICHRA Setup Workspace",
-                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
-                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
-                "Full access to open setup form, save drafts, submit applications, and renew locked tokens.",
-                "Can view/edit only their own application; cannot open the new employer setup form.",
+                "Full access to save drafts, submit applications, and renew locked tokens.",
+                "Full access to save drafts, submit applications, and renew locked tokens.",
+                "Full access for assigned employers with lock-state aware actions.",
+                "Can view/edit only their own application and submit when eligible.",
             ),
             (
                 "Team administration",
-                "Can create teams, assign the single Team Super Admin per team, and set the broker team admin per team.",
-                "Can view team workspace; if flagged as Team Super Admin, can operate with admin-equivalent permissions limited to their team.",
-                "Can view team workspace; if flagged as Team Super Admin, can operate with admin-equivalent permissions limited to their team.",
+                "Can create teams, assign Team Super Admin, and set broker team admin singleton per team.",
+                "Can administer users in their team; Team Super Admin flag grants admin-equivalent scope within the team.",
+                "Can view team workspace; Team Super Admin flag grants admin-equivalent scope within the team.",
                 "Read-only team awareness; no team administration actions.",
             ),
             (
-                "Team task engine",
-                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
-                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
-                "Can assign and complete tasks within the same team for super admin/admin/broker users.",
-                "No task assignment privileges.",
-            ),
-            (
-                "Notifications",
-                "Can send notifications to manageable users and review own inbox.",
-                "Can send notifications to manageable users and review own inbox.",
-                "Inbox only.",
-                "Inbox only.",
-            ),
-            (
-                "Activity Log visibility",
-                "Full access to the Activity Log view.",
-                "No Activity Log tab.",
-                "No Activity Log tab.",
+                "Audit visibility",
+                "Platform-wide Activity Log visibility.",
+                "Team-scoped Activity Log visibility.",
+                "Team-scoped Activity Log visibility.",
                 "No Activity Log tab.",
             ),
         ]
@@ -2293,7 +2357,7 @@ class TaskTrackerApp:
         return f"""
           <section class='section-block panel-card'>
             <h3>Permissions and Access Control Baseline</h3>
-            <p class='subtitle'>This page documents the effective authorization behavior implemented in the running app (role checks, team scoping, and view-level constraints). Use it as the source-of-truth reference for support, security reviews, and operational runbooks.</p>
+            <p class='subtitle'>Authorization is enforced through capability + scope checks (platform, team, employer) with role defaults layered on top. Use this panel as the runtime source of truth.</p>
             <div class='table-wrap'>
               <table>
                 <thead>
@@ -2312,12 +2376,12 @@ class TaskTrackerApp:
           <section class='section-block panel-card'>
             <h3>Operational Rules in Effect (DevOps Notes)</h3>
             <ul class='status-list'>
-              <li><strong>Role hierarchy:</strong> <code>super_admin &gt; admin &gt; broker &gt; employer</code>. Hierarchy drives create/update enforcement to prevent upward privilege escalation.</li>
-              <li><strong>Team boundary:</strong> Most management actions require actor and target to share a team ID. This is the primary multi-tenant guardrail for admin and broker accounts.</li>
+              <li><strong>Capability model:</strong> Permission decisions resolve through explicit capabilities (for example <code>team.user_admin</code>, <code>team.audit_view</code>, and <code>employer.user_admin</code>) and scoped resource checks.</li>
+              <li><strong>Team boundary:</strong> Management and audit actions are team-scoped for non-super users to preserve tenant isolation.</li>
+              <li><strong>Broker staff provisioning guardrail:</strong> Brokers cannot create or edit broker/admin staff users, preventing peer-account sprawl.</li>
               <li><strong>Single broker admin per team:</strong> The broker-team-admin designation is singleton per team and can only be reassigned by a super admin.</li>
-              <li><strong>Employer account model:</strong> Employer identities are read-only from the employer perspective and are intended to be managed by upstream operations roles.</li>
               <li><strong>Application lock model:</strong> Submitted ICHRA applications become token-locked until an operations role renews access, enabling controlled post-submit edits.</li>
-              <li><strong>Logs and observability:</strong> The Activity Log view is intentionally restricted to super admin while action events continue to be recorded for operations auditing.</li>
+              <li><strong>Effective access endpoint:</strong> <code>GET /me/access</code> returns capability flags plus scoped memberships so UI can render access-aware actions without trial-and-error 403 flows.</li>
             </ul>
           </section>
         """
@@ -2383,7 +2447,8 @@ class TaskTrackerApp:
 
         show_application = role in {"super_admin", "admin", "broker", "employer"}
         show_settings = role in {"super_admin", "admin", "broker", "employer"}
-        show_logs = role == "super_admin"
+        capabilities = self.capability_flags_for_user(user)
+        show_logs = capabilities["platform.audit_view_all"] or capabilities["team.audit_view"]
 
         notifications = self.list_notifications(user["id"])
         unseen_count = sum(1 for item in notifications if not item["seen"])
@@ -2789,7 +2854,14 @@ class TaskTrackerApp:
         if role == "broker":
             header_primary_cta = "<a class='nav-link active' href='/?view=dashboard'>Refer a Client</a>"
 
-        logs = self.list_activity_logs(query) if show_logs else []
+        if capabilities["platform.audit_view_all"]:
+            logs = self.list_activity_logs(query)
+        elif capabilities["team.audit_view"]:
+            scoped_query = dict(query)
+            scoped_query["team_id"] = [str(user["team_id"])] if user["team_id"] is not None else ["-1"]
+            logs = self.list_activity_logs(scoped_query)
+        else:
+            logs = []
         log_rows = "".join(
             f"<tr><td>{html.escape(row['created_at'])}</td><td>{html.escape(row['actor_username'])}</td><td>{html.escape(row['actor_role'])}</td><td>{html.escape(row['action'])}</td><td>{html.escape(row['target_label'])}</td><td>{html.escape(row['details'] or '')}</td></tr>"
             for row in logs
