@@ -1314,5 +1314,82 @@ class AppTests(unittest.TestCase):
         self.assertEqual(artifact["access_token_status"], "active")
         self.assertEqual(artifact["artifact_status"], "draft")
 
+    def test_each_team_has_single_team_super_admin_flag(self):
+        db = self.app.db()
+        team_id = db.execute("SELECT id FROM teams WHERE name = 'Core Admin Team'").fetchone()["id"]
+        flagged = db.execute(
+            "SELECT id FROM users WHERE team_id = ? AND is_team_super_admin = 1 AND role IN ('admin','broker') AND is_active = 1",
+            (team_id,),
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(flagged), 1)
+
+    def test_super_admin_can_reassign_team_super_admin(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        create_broker = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=teamsuperbroker&role=broker&team_id=1",
+            cookie_header=super_cookie,
+        )
+        self.assertEqual(dict(create_broker["headers"]).get("Location"), "/")
+        broker = next(u for u in self.app.get_users_with_completion() if u["username"] == "teamsuperbroker")
+
+        assign = call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-team-super-admin",
+            body=f"team_id=1&user_id={broker['id']}",
+            cookie_header=super_cookie,
+        )
+        self.assertEqual(dict(assign["headers"]).get("Location"), "/?view=team")
+
+        db = self.app.db()
+        current = db.execute(
+            "SELECT username FROM users WHERE team_id = 1 AND is_team_super_admin = 1 AND role IN ('admin','broker')"
+        ).fetchall()
+        db.close()
+        self.assertEqual(len(current), 1)
+        self.assertEqual(current[0]["username"], "teamsuperbroker")
+
+    def test_team_super_admin_broker_can_create_team_admin_user(self):
+        super_cookie = ""
+        super_cookie = merge_cookies(super_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=tierbroker&role=broker&team_id=1",
+            cookie_header=super_cookie,
+        )
+        broker_user = next(u for u in self.app.get_users_with_completion() if u["username"] == "tierbroker")
+        call_app(
+            self.app,
+            method="POST",
+            path="/teams/assign-team-super-admin",
+            body=f"team_id=1&user_id={broker_user['id']}",
+            cookie_header=super_cookie,
+        )
+
+        broker_cookie = ""
+        broker_cookie = merge_cookies(
+            broker_cookie,
+            call_app(self.app, method="POST", path="/login", body="username=tierbroker&password=user")["headers"],
+        )
+        create_admin = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=teamadmin2&role=admin",
+            cookie_header=broker_cookie,
+        )
+        self.assertEqual(dict(create_admin["headers"]).get("Location"), "/")
+
+        relogin = call_app(self.app, method="POST", path="/login", body="username=teamadmin2&password=user")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+
 if __name__ == "__main__":
     unittest.main()

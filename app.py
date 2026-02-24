@@ -116,6 +116,7 @@ class TaskTrackerApp:
                 password_hint TEXT NOT NULL DEFAULT 'user',
                 role TEXT NOT NULL DEFAULT 'admin',
                 is_team_admin INTEGER NOT NULL DEFAULT 0,
+                is_team_super_admin INTEGER NOT NULL DEFAULT 0,
                 theme TEXT NOT NULL DEFAULT 'default',
                 density TEXT NOT NULL DEFAULT 'comfortable',
                 created_by_user_id INTEGER,
@@ -270,12 +271,22 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN shuffle_enabled INTEGER NOT NULL DEFAULT 0")
         if "is_team_admin" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN is_team_admin INTEGER NOT NULL DEFAULT 0")
+        if "is_team_super_admin" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN is_team_super_admin INTEGER NOT NULL DEFAULT 0")
         db.execute("UPDATE users SET is_team_admin = 0 WHERE role != 'broker'")
+        db.execute("UPDATE users SET is_team_super_admin = 0 WHERE role NOT IN ('admin', 'broker')")
         db.execute(
             """
             CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_team_admin_per_team
             ON users(team_id)
             WHERE role = 'broker' AND is_team_admin = 1 AND team_id IS NOT NULL AND is_active = 1
+            """
+        )
+        db.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_one_active_team_super_admin_per_team
+            ON users(team_id)
+            WHERE is_team_super_admin = 1 AND team_id IS NOT NULL AND is_active = 1 AND role IN ('admin', 'broker')
             """
         )
 
@@ -346,6 +357,23 @@ class TaskTrackerApp:
             WHERE role = 'admin' AND team_id IS NOT NULL
             """
         )
+        team_ids = [row[0] for row in db.execute("SELECT id FROM teams").fetchall()]
+        for team_id in team_ids:
+            team_super_admin = db.execute(
+                """
+                SELECT id
+                FROM users
+                WHERE team_id = ? AND role IN ('admin', 'broker') AND is_active = 1
+                ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, id
+                LIMIT 1
+                """,
+                (team_id,),
+            ).fetchone()
+            if team_super_admin:
+                db.execute(
+                    "UPDATE users SET is_team_super_admin = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE team_id = ? AND role IN ('admin', 'broker')",
+                    (team_super_admin["id"], team_id),
+                )
 
         employer_columns = {row[1] for row in db.execute("PRAGMA table_info(employers)").fetchall()}
         if "application_complete" not in employer_columns:
@@ -554,6 +582,13 @@ class TaskTrackerApp:
                 return self.redirect(start_response, "/?view=team", flash=("error", "Only super admins can assign team broker admins."))
             return self.handle_assign_broker_admin(start_response, session_user, self.parse_form(environ))
 
+        if path == "/teams/assign-team-super-admin" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            if session_user["role"] != "super_admin":
+                return self.redirect(start_response, "/?view=team", flash=("error", "Only super admins can assign team super admins."))
+            return self.handle_assign_team_super_admin(start_response, session_user, self.parse_form(environ))
+
         if path == "/team-tasks/create" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
@@ -661,7 +696,7 @@ class TaskTrackerApp:
         db = self.db()
         rows = db.execute(
             """
-            SELECT id, username, role, is_active, team_id, is_team_admin
+            SELECT id, username, role, is_active, team_id, is_team_admin, is_team_super_admin
             FROM users
             WHERE role != 'super_admin'
             ORDER BY is_active DESC, username ASC
@@ -812,10 +847,35 @@ class TaskTrackerApp:
     def list_assignable_users(self):
         db = self.db()
         rows = db.execute(
-            "SELECT id, username, role, team_id FROM users WHERE role != 'super_admin' AND is_active = 1 ORDER BY role, username"
+            "SELECT id, username, role, team_id, is_team_super_admin FROM users WHERE role != 'super_admin' AND is_active = 1 ORDER BY role, username"
         ).fetchall()
         db.close()
         return rows
+
+    def ensure_team_super_admin_for_team(self, team_id: int | None):
+        if team_id is None:
+            return
+        db = self.db()
+        current = db.execute(
+            "SELECT id FROM users WHERE team_id = ? AND is_team_super_admin = 1 AND is_active = 1 AND role IN ('admin', 'broker')",
+            (team_id,),
+        ).fetchone()
+        if current:
+            db.close()
+            return
+        fallback = db.execute(
+            """
+            SELECT id FROM users
+            WHERE team_id = ? AND is_active = 1 AND role IN ('admin', 'broker')
+            ORDER BY CASE role WHEN 'admin' THEN 0 ELSE 1 END, id
+            LIMIT 1
+            """,
+            (team_id,),
+        ).fetchone()
+        if fallback:
+            db.execute("UPDATE users SET is_team_super_admin = CASE WHEN id = ? THEN 1 ELSE 0 END WHERE team_id = ? AND role IN ('admin', 'broker')", (fallback["id"], team_id))
+            db.commit()
+        db.close()
 
     def create_team(self, name: str, created_by_user_id: int):
         db = self.db()
@@ -830,7 +890,9 @@ class TaskTrackerApp:
         if not admin or not team:
             db.close()
             raise ValueError("Invalid admin or team.")
-        db.execute("UPDATE users SET team_id = ? WHERE id = ?", (team_id, admin_user_id))
+        old_team = db.execute("SELECT team_id FROM users WHERE id = ?", (admin_user_id,)).fetchone()
+        old_team_id = old_team["team_id"] if old_team else None
+        db.execute("UPDATE users SET team_id = ?, is_team_super_admin = 0 WHERE id = ?", (team_id, admin_user_id))
         db.execute(
             "INSERT OR IGNORE INTO team_members (team_id, user_id, role_scope) VALUES (?, ?, 'admin')",
             (team_id, admin_user_id),
@@ -857,6 +919,8 @@ class TaskTrackerApp:
         )
         db.commit()
         db.close()
+        self.ensure_team_super_admin_for_team(old_team_id)
+        self.ensure_team_super_admin_for_team(team_id)
 
     def assign_user_to_team(self, user_id: int, team_id: int):
         db = self.db()
@@ -866,7 +930,9 @@ class TaskTrackerApp:
             db.close()
             raise ValueError("Invalid user or team.")
 
-        db.execute("UPDATE users SET team_id = ? WHERE id = ?", (team_id, user_id))
+        old_team = db.execute("SELECT team_id FROM users WHERE id = ?", (user_id,)).fetchone()
+        old_team_id = old_team["team_id"] if old_team else None
+        db.execute("UPDATE users SET team_id = ?, is_team_super_admin = CASE WHEN role IN ('admin', 'broker') THEN 0 ELSE is_team_super_admin END WHERE id = ?", (team_id, user_id))
         if target["role"] == "admin":
             db.execute(
                 "INSERT OR IGNORE INTO team_members (team_id, user_id, role_scope) VALUES (?, ?, 'admin')",
@@ -894,6 +960,8 @@ class TaskTrackerApp:
             )
         db.commit()
         db.close()
+        self.ensure_team_super_admin_for_team(old_team_id)
+        self.ensure_team_super_admin_for_team(team_id)
 
     def list_visible_employers(self, session_user):
         db = self.db()
@@ -996,11 +1064,33 @@ class TaskTrackerApp:
             return False
         if session_user["role"] == "super_admin":
             return target_user["role"] != "super_admin"
+        if self.is_team_super_admin_user(session_user):
+            return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         if session_user["role"] == "broker":
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"broker", "employer"}
         if session_user["role"] == "admin":
             return target_user["team_id"] == session_user["team_id"] and target_user["role"] in {"admin", "broker", "employer"}
         return target_user["id"] == session_user["id"]
+
+    def is_team_super_admin_user(self, user):
+        return bool(user) and user["role"] in {"admin", "broker"} and user["is_team_super_admin"] == 1 and user["is_active"] == 1
+
+    def assign_team_super_admin(self, user_id: int, team_id: int):
+        db = self.db()
+        target = db.execute(
+            "SELECT id FROM users WHERE id = ? AND role IN ('admin', 'broker') AND team_id = ? AND is_active = 1",
+            (user_id, team_id),
+        ).fetchone()
+        if not target:
+            db.close()
+            raise ValueError("Invalid team super admin assignment.")
+        db.execute(
+            "UPDATE users SET is_team_super_admin = 0 WHERE role IN ('admin', 'broker') AND team_id = ?",
+            (team_id,),
+        )
+        db.execute("UPDATE users SET is_team_super_admin = 1 WHERE id = ?", (user_id,))
+        db.commit()
+        db.close()
 
 
     def list_team_members(self, team_id: int):
@@ -1316,9 +1406,13 @@ class TaskTrackerApp:
             "SELECT 1 FROM users WHERE role = 'broker' AND team_id = ? AND is_team_admin = 1 AND is_active = 1",
             (team_id,),
         ).fetchone() is None else 0
+        is_team_super_admin = 1 if role in {"admin", "broker"} and team_id is not None and db.execute(
+            "SELECT 1 FROM users WHERE role IN ('admin', 'broker') AND team_id = ? AND is_team_super_admin = 1 AND is_active = 1",
+            (team_id,),
+        ).fetchone() is None else 0
         db.execute(
-            "INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)",
-            (username, username.capitalize(), hash_password(password), password, role, created_by_user_id, team_id, is_team_admin),
+            "INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin, is_team_super_admin) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+            (username, username.capitalize(), hash_password(password), password, role, created_by_user_id, team_id, is_team_admin, is_team_super_admin),
         )
         db.commit()
         db.close()
@@ -1331,11 +1425,12 @@ class TaskTrackerApp:
             raise ValueError("User not found")
         password_hash = hash_password(password) if password else user["password_hash"]
         db.execute(
-            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ?, is_team_admin = CASE WHEN ? = 'broker' AND is_team_admin = 1 THEN 1 ELSE 0 END WHERE id = ?",
-            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], is_active, role, user_id),
+            "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ?, is_team_admin = CASE WHEN ? = 'broker' AND is_team_admin = 1 THEN 1 ELSE 0 END, is_team_super_admin = CASE WHEN ? IN ('admin', 'broker') AND is_team_super_admin = 1 THEN 1 ELSE 0 END WHERE id = ?",
+            (username, username.capitalize(), role, password_hash, password or user["password_hint"], 0 if password else user["must_change_password"], is_active, role, role, user_id),
         )
         db.commit()
         db.close()
+        self.ensure_team_super_admin_for_team(user["team_id"])
 
     def build_employer_username(self, db, legal_name: str) -> str:
         seed = "".join(ch for ch in legal_name.lower() if ch.isalnum())[:12] or "employer"
@@ -1353,8 +1448,8 @@ class TaskTrackerApp:
         display_name = form["contact_name"].strip() or form["brokerage_name"].strip()
         db.execute(
             """
-            INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin)
-            VALUES (?, ?, ?, ?, 'broker', 1, 1, NULL, 0)
+            INSERT INTO users (username, display_name, password_hash, password_hint, role, created_by_user_id, must_change_password, team_id, is_team_admin, is_team_super_admin)
+            VALUES (?, ?, ?, ?, 'broker', 1, 1, NULL, 0, 0)
             """,
             (username, display_name, hash_password("user"), "user"),
         )
@@ -1610,13 +1705,14 @@ class TaskTrackerApp:
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
-        if session_user["role"] == "broker" and role not in {"broker", "employer"}:
+        is_team_super_admin = self.is_team_super_admin_user(session_user)
+        if session_user["role"] == "broker" and not is_team_super_admin and role not in {"broker", "employer"}:
             return self.redirect(start_response, "/", flash=("error", "Brokers can only create broker or employer users."))
-        creator_level = ROLE_LEVELS.get(session_user["role"], -1)
+        creator_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         role_level = ROLE_LEVELS.get(role, -1)
         if role_level < 0:
             return self.redirect(start_response, "/", flash=("error", "Invalid role selected."))
-        if session_user["role"] != "broker" and role_level >= creator_level:
+        if (session_user["role"] != "broker" or not is_team_super_admin) and role_level >= creator_level:
             return self.redirect(start_response, "/", flash=("error", "You can only create users below your role level."))
         if len(username) < 3:
             return self.redirect(start_response, "/", flash=("error", "New users need a username (3+)."))
@@ -1645,13 +1741,14 @@ class TaskTrackerApp:
         role = form.get("role", "admin")
         password = form.get("password", "")
         is_active = 1 if form.get("is_active", "1") == "1" else 0
-        actor_level = ROLE_LEVELS.get(session_user["role"], -1)
+        is_team_super_admin = self.is_team_super_admin_user(session_user)
+        actor_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         target_level = ROLE_LEVELS.get(role, -1)
-        if session_user["role"] == "broker" and role not in {"broker", "employer"}:
+        if session_user["role"] == "broker" and not is_team_super_admin and role not in {"broker", "employer"}:
             return self.redirect(start_response, "/", flash=("error", "Brokers can only manage broker or employer users."))
         if target_level < 0:
             return self.redirect(start_response, "/", flash=("error", "Invalid role selected."))
-        if session_user["role"] != "broker" and target_level >= actor_level:
+        if (session_user["role"] != "broker" or not is_team_super_admin) and target_level >= actor_level:
             return self.redirect(start_response, "/", flash=("error", "You can only assign roles below your own."))
 
         target_user = self.get_user_by_id(user_id)
@@ -1964,6 +2061,20 @@ class TaskTrackerApp:
         self.log_action(session_user["id"], "team_broker_admin_assigned", "user", broker_user_id, target["username"] if target else "broker", f"team_id={team_id}")
         return self.redirect(start_response, "/?view=team", flash=("success", "Team broker admin updated."))
 
+    def handle_assign_team_super_admin(self, start_response, session_user, form):
+        try:
+            user_id = int(form.get("user_id", ""))
+            team_id = int(form.get("team_id", ""))
+        except ValueError:
+            return self.redirect(start_response, "/?view=team", flash=("error", "Select a team and assignee."))
+        try:
+            self.assign_team_super_admin(user_id, team_id)
+        except ValueError:
+            return self.redirect(start_response, "/?view=team", flash=("error", "Invalid team super admin assignment."))
+        target = self.get_user_by_id(user_id)
+        self.log_action(session_user["id"], "team_super_admin_assigned", "user", user_id, target["username"] if target else "team-user", f"team_id={team_id}")
+        return self.redirect(start_response, "/?view=team", flash=("success", "Team super admin updated."))
+
 
     def handle_create_team_task(self, start_response, session_user, form):
         title = form.get("title", "").strip()
@@ -2132,9 +2243,9 @@ class TaskTrackerApp:
             ),
             (
                 "Team administration",
-                "Can create teams and assign the single broker team admin per team.",
-                "Can view team workspace but cannot assign broker team admins.",
-                "Can view team workspace but cannot assign broker team admins.",
+                "Can create teams, assign the single Team Super Admin per team, and set the broker team admin per team.",
+                "Can view team workspace; if flagged as Team Super Admin, can operate with admin-equivalent permissions limited to their team.",
+                "Can view team workspace; if flagged as Team Super Admin, can operate with admin-equivalent permissions limited to their team.",
                 "Read-only team awareness; no team administration actions.",
             ),
             (
@@ -2341,7 +2452,7 @@ class TaskTrackerApp:
                 f"""
                 <tr>
                   <td>{html.escape(row['username'])}</td>
-                      <td>{html.escape(row['role'])}{" · Team Admin" if row['role'] == 'broker' and row['is_team_admin'] else ''}</td>
+                      <td>{html.escape(row['role'])}{" · Team Admin" if row['role'] == 'broker' and row['is_team_admin'] else ''}{" · Team Super Admin" if row['is_team_super_admin'] else ''}</td>
                   <td>{'Active' if row['is_active'] else 'Deactivated'}</td>
                   <td>
                     <button type='button' class='table-link as-button' data-modal-open='user-settings-{row['id']}'>Open settings</button>
@@ -2466,6 +2577,11 @@ class TaskTrackerApp:
         assignable_user_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
             for row in assignable_users
+        )
+        team_super_admin_options = "".join(
+            f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])}){' · current team super admin' if row['is_team_super_admin'] else ''}</option>"
+            for row in assignable_users
+            if row["role"] in {"admin", "broker"}
         )
         assign_task_user_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['display_name'])} ({html.escape(row['username'])} · {html.escape(row['role'])})</option>"
@@ -2601,6 +2717,11 @@ class TaskTrackerApp:
                 <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
                 <select name='broker_user_id' required><option value=''>Select broker</option>{broker_team_admin_options}</select>
                 <button type='submit'>Set Team Broker Admin</button>
+              </form>
+              <form method='post' action='/teams/assign-team-super-admin' class='inline-form'>
+                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
+                <select name='user_id' required><option value=''>Select admin or broker</option>{team_super_admin_options}</select>
+                <button type='submit'>Set Team Super Admin</button>
               </form>
               <div class='table-wrap'><table class='user-table'>
                 <thead><tr><th>Active Team</th><th>Admins</th><th>Brokers</th><th>Employers</th><th>Members</th></tr></thead>
