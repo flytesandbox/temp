@@ -106,6 +106,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 73, "merged_at": "2026-02-25 03:16 UTC", "change": "Merged PR #73: Add NEW_UI mode with Super Admin toggle, persisted , and initial NEW_UI dashboard shell", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 74, "merged_at": "2026-02-25 13:23 UTC", "change": "Merged PR #74: Refine login and team panels for a more compact visual hierarchy", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 75, "merged_at": "2026-02-25 13:42 UTC", "change": "Merged PR #75: Compact login UI, switch accents to light blue, and fix employer visibility in notifications/workspaces", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
+    {"pr": 76, "merged_at": "2026-02-25 13:54 UTC", "change": "Merged PR #76: Move Employers into Team sub-nav and fix default employer list scope", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
 ]
 
 
