@@ -3066,6 +3066,13 @@ class TaskTrackerApp:
             </section>
         """
 
+        dev_note_panel = """
+            <section class='section-block'>
+              <h3>Development Notes</h3>
+              <p class='subtitle'>Reserved for ongoing development callouts and in-flight implementation notes. Additions can be tracked here as work proceeds.</p>
+            </section>
+        """
+
         forms_workspace_hint = {
             "super_admin": "Govern all ICHRA setup workspace pipelines across teams.",
             "admin": "Tool employer setup and ICHRA artifacts for your assigned organization.",
@@ -3142,6 +3149,7 @@ class TaskTrackerApp:
         if show_logs:
             system_sections.append(("logs", "Activity Log"))
         system_sections.append(("devlog", "Dev Log"))
+        system_sections.append(("devnote", "Dev Note"))
         requested_system_view = (query.get("system_view", [""])[0] or "").strip().lower()
         valid_system_keys = {key for key, _ in system_sections}
         active_system_view = requested_system_view if requested_system_view in valid_system_keys else system_sections[0][0]
@@ -3153,6 +3161,7 @@ class TaskTrackerApp:
             "permissions": self.render_permissions_panel(),
             "logs": logs_panel if show_logs else "<section class='section-block'><p class='subtitle'>No activity log access for this account.</p></section>",
             "devlog": devlog_panel,
+            "devnote": dev_note_panel,
         }
         system_panel = f"<nav class='dashboard-nav sub-nav'>{system_nav}</nav>{system_panels.get(active_system_view, self.render_permissions_panel())}"
 
@@ -3332,10 +3341,10 @@ class TaskTrackerApp:
               <button type='submit' class='secondary'>Load Application</button>
             </form>
             <div class='artifact-meta-grid compact-meta-grid'>
-              <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
-              <article><h4>Application Status</h4><p>{status_label}</p></article>
-              <article><h4>Access Token</h4><p>{'Locked' if is_locked else 'Active'}</p></article>
-              <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
+              <article><span>Employer</span><strong>{html.escape(selected_employer['legal_name'])}</strong></article>
+              <article><span>Application Status</span><strong>{status_label}</strong></article>
+              <article><span>Access Token</span><strong>{'Locked' if is_locked else 'Active'}</strong></article>
+              <article><span>Portal User</span><strong>{html.escape(selected_employer['portal_username'])}</strong></article>
             </div>
             {scope_note}
           </section>
