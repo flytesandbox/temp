@@ -234,6 +234,74 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=river2&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
+
+    def test_notification_targets_include_employer_users_in_scope(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_employer = call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Bluebird+Manufacturing&contact_name=Pat+Lee&work_email=pat%40bluebird.com"
+                "&phone=555-0100&company_size=75&industry=Manufacturing&website=https%3A%2F%2Fbluebird.example&state=CA"
+            ),
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_employer["headers"]).get("Location"), "/?view=employers")
+
+        notifications_view = call_app(self.app, method="GET", path="/", cookie_header=admin_cookie, query_string="view=notifications")
+        self.assertIn("Bluebird Manufacturing", notifications_view["body"])
+        self.assertIn("(employer", notifications_view["body"])
+
+    def test_team_super_admin_broker_gets_team_employer_visibility(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_broker = call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=teamscopebroker&password=user&role=broker",
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_broker["headers"]).get("Location"), "/")
+
+        db = self.app.db()
+        broker = db.execute("SELECT id, team_id FROM users WHERE username = 'teamscopebroker' LIMIT 1").fetchone()
+        admin_user = db.execute("SELECT id FROM users WHERE username = 'alex' LIMIT 1").fetchone()
+        db.close()
+
+        self.app.assign_team_super_admin(broker["id"], broker["team_id"])
+
+        self.app.create_employer(
+            creator_user_id=admin_user["id"],
+            form={
+                "legal_name": "Teamwide Employer",
+                "contact_name": "Jordan Case",
+                "work_email": "jordan@teamwide.example",
+                "phone": "555-1001",
+                "company_size": "42",
+                "industry": "Services",
+                "website": "https://teamwide.example",
+                "state": "NY",
+            },
+            broker_user_id=None,
+        )
+
+        broker_cookie = ""
+        login_broker = call_app(self.app, method="POST", path="/login", body="username=teamscopebroker&password=user")
+        broker_cookie = merge_cookies(broker_cookie, login_broker["headers"])
+
+        employers_view = call_app(self.app, method="GET", path="/", cookie_header=broker_cookie, query_string="view=employers&employers_scope=active")
+        application_view = call_app(self.app, method="GET", path="/", cookie_header=broker_cookie, query_string="view=application")
+
+        self.assertIn("Teamwide Employer", employers_view["body"])
+        self.assertIn("Teamwide Employer", application_view["body"])
+
     def test_admin_can_create_brokers_under_org(self):
         cookie = ""
         login = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
