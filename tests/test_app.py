@@ -789,7 +789,7 @@ class AppTests(unittest.TestCase):
         dashboard = call_app(self.app, method="GET", path="/", query_string="view=employers", cookie_header=employer_cookie)
         self.assertIn("Complete", dashboard["body"])
 
-    def test_login_page_shows_db_backed_accounts_for_roles(self):
+    def test_login_page_prioritizes_login_and_setup_entry_points(self):
         admin_cookie = ""
         admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
         call_app(
@@ -801,10 +801,9 @@ class AppTests(unittest.TestCase):
         )
 
         login_page = call_app(self.app, method="GET", path="/login")
-        self.assertIn("Active demo accounts (DB-backed)", login_page["body"])
-        self.assertIn("admin", login_page["body"])
-        self.assertIn("brokerx", login_page["body"])
-        self.assertIn("alex", login_page["body"])
+        self.assertNotIn("Active demo accounts (DB-backed)", login_page["body"])
+        self.assertNotIn("password_hint", login_page["body"])
+        self.assertIn("Member Login", login_page["body"])
         self.assertIn("Start New Setup", login_page["body"])
         self.assertIn("public-setup-modal", login_page["body"])
         self.assertIn("New Employer Setup Form", login_page["body"])

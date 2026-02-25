@@ -2238,11 +2238,6 @@ class TaskTrackerApp:
         return morsel.OutputString()
 
     def render_login(self, start_response, flash_message):
-        demo_accounts = self.get_login_demo_accounts()
-        demo_rows = "".join(
-            f"<li><code>{html.escape(row['username'])}</code> / <code>{html.escape(row['password_hint'])}</code> <small>({html.escape(row['role'])})</small></li>"
-            for row in demo_accounts
-        )
         html_body = self.flash_html(flash_message) + f"""
             <section class="card auth-card vibe-orbit">
               <header class='app-header'>
@@ -2255,14 +2250,14 @@ class TaskTrackerApp:
               </header>
 
               <section class="section-block panel-card signup-highlight">
-                <h3>New Employer/Broker setup</h3>
-                <p class="subtitle">Join today to unlock guided enrollment, automated reminders, and a single source of truth for your ICHRA setup.</p>
+                <h3>Need to create a new account?</h3>
+                <p class="subtitle">Start a secure setup for a new Employer or Broker account. We&apos;ll guide you to the right form next.</p>
                 <div class='signup-benefits'>
-                  <span class='pill pending'>Guided setup wizard</span>
-                  <span class='pill pending'>Team collaboration</span>
-                  <span class='pill pending'>Status visibility</span>
+                  <span class='pill pending'>Employer setup form</span>
+                  <span class='pill pending'>Broker setup form</span>
+                  <span class='pill pending'>Guided onboarding</span>
                 </div>
-                <button type="button" class="secondary" data-modal-open="public-setup-modal">Start New Setup</button>
+                <button type="button" class="secondary centered-setup-button" data-modal-open="public-setup-modal">Start New Setup</button>
               </section>
 
               <section class='section-block panel-card'>
@@ -2272,11 +2267,6 @@ class TaskTrackerApp:
                   <label>Password <input type="password" name="password" placeholder="user" required /></label>
                   <button type="submit" class='primary-action'>Start workspace</button>
                 </form>
-              </section>
-
-              <section class='section-block panel-card'>
-                <h3>Active demo accounts (DB-backed)</h3>
-                <ul class='status-list compact-list'>{demo_rows or '<li>No active users found.</li>'}</ul>
               </section>
             </section>
             <div class="modal" id="public-setup-modal" aria-hidden="true">
