@@ -219,6 +219,18 @@ button.secondary{background:color-mix(in srgb,var(--accent-2) 70%, #eee);color:v
 .team-focus-metrics article{padding:.38rem .48rem;border-radius:10px;background:color-mix(in srgb,var(--surface) 92%, white);border:1px solid color-mix(in srgb,var(--text) 10%, transparent)}
 .team-focus-metrics span{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
 .team-focus-metrics strong{display:block;margin-top:.1rem;font-size:.95rem}
+.team-workflow{margin:0 0 .95rem;padding:.8rem;border-radius:14px;background:color-mix(in srgb,var(--surface) 95%, var(--accent) 5%);border:1px solid color-mix(in srgb,var(--text) 10%, transparent)}
+.team-workflow-header h4{margin:0 0 .25rem;font-size:.95rem}
+.team-workflow-header p{margin:0 0 .75rem;color:var(--muted);font-size:.88rem}
+.team-workflow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.65rem}
+.team-workflow-step{padding:.65rem;border-radius:12px;background:color-mix(in srgb,var(--surface) 95%, white);border:1px solid color-mix(in srgb,var(--text) 10%, transparent)}
+.team-workflow-kicker{margin:0 0 .22rem;font-size:.68rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.team-workflow-step h5{margin:0 0 .22rem;font-size:.88rem}
+.team-workflow-step p{margin:0 0 .5rem;color:var(--muted);font-size:.82rem}
+.workflow-form{display:grid;gap:.42rem;margin-top:.45rem}
+.workflow-form label{display:grid;gap:.18rem}
+.workflow-form label span{font-size:.72rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:700}
+.workflow-form button{justify-self:start}
 .workspace-employer-snapshot{margin:0 0 .8rem;padding:.55rem .7rem;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%, var(--surface));border:1px solid color-mix(in srgb,var(--accent) 20%, transparent)}
 .workspace-employer-snapshot h4{margin:0 0 .35rem;font-size:.86rem;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
 .artifact-meta-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.45rem}
