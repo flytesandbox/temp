@@ -4,17 +4,17 @@
   --radius-sm: 12px; --radius-md: 18px; --radius-lg: 28px; --radius-pill: 999px;
   --shadow-1: 0 8px 20px rgba(40, 30, 60, 0.08); --shadow-2: 0 18px 36px rgba(40, 30, 60, 0.12);
   --motion-fast: 140ms; --motion-base: 220ms; --ease-playful: cubic-bezier(.2,.8,.2,1);
-  --bg: #f8efea; --surface: #fffaf4; --text: #3f2f35; --muted: #806870; --accent: #fb6f61; --accent-2: #f4c96d;
+  --bg: #fbfaf8; --surface: #fefdfb; --text: #3f2f35; --muted: #806870; --accent: #fb6f61; --accent-2: #f4c96d;
 }
 *{box-sizing:border-box}
-body{margin:0;font-family:var(--font-body);background:var(--bg);color:var(--text);background-image:radial-gradient(rgba(255,255,255,.4) 1px,transparent 1px);background-size:16px 16px}
+body{margin:0;font-family:var(--font-body);background:var(--bg);color:var(--text);background-image:radial-gradient(rgba(255,255,255,.2) 1px,transparent 1px);background-size:18px 18px}
 .container{width:min(1240px,96vw);margin:1rem auto;padding-bottom:2rem}
 .card{background:var(--surface);border-radius:var(--radius-lg);box-shadow:var(--shadow-1);padding:var(--space-5);border:1px solid rgba(80,40,30,.08)}
-.theme-midnight{--bg:#1d1c2d;--surface:#26243b;--text:#f3edf8;--muted:#b9afd0;--accent:#b38cff;--accent-2:#50d5c8}
-.theme-sunset{--bg:#ffe9dd;--surface:#fff8ef;--text:#4a332b;--muted:#8d6558;--accent:#f9735d;--accent-2:#f5b055}
-.theme-dawn{--bg:#fdf4df;--surface:#fffdf6;--text:#443b2f;--muted:#7f7465;--accent:#e88d37;--accent-2:#f3cf74}
-.theme-mint{--bg:#e7f6f0;--surface:#f7fffb;--text:#27433a;--muted:#5f7f73;--accent:#41b883;--accent-2:#9bd8ba}
-.theme-lavender{--bg:#f3edff;--surface:#fbf8ff;--text:#3e305a;--muted:#746694;--accent:#8b67ff;--accent-2:#cfb8ff}
+.theme-midnight{--bg:#232235;--surface:#2d2c43;--text:#f3edf8;--muted:#b9afd0;--accent:#b38cff;--accent-2:#50d5c8}
+.theme-sunset{--bg:#fff4ed;--surface:#fffbf6;--text:#4a332b;--muted:#8d6558;--accent:#f9735d;--accent-2:#f5b055}
+.theme-dawn{--bg:#fef9ef;--surface:#fffef9;--text:#443b2f;--muted:#7f7465;--accent:#e88d37;--accent-2:#f3cf74}
+.theme-mint{--bg:#f2fbf7;--surface:#fbfffd;--text:#27433a;--muted:#5f7f73;--accent:#41b883;--accent-2:#9bd8ba}
+.theme-lavender{--bg:#f8f5ff;--surface:#fdfcff;--text:#3e305a;--muted:#746694;--accent:#8b67ff;--accent-2:#cfb8ff}
 .app-header,.dashboard-header{display:flex;justify-content:space-between;gap:var(--space-4);align-items:flex-start}
 h1,h2,h3{margin:.2rem 0 .6rem}
 .subtitle{color:var(--muted);margin:0 0 var(--space-4)}
@@ -25,7 +25,7 @@ input,select,textarea{border:1px solid color-mix(in srgb,var(--text) 18%, transp
 button,.primary-action{border:none;border-radius:var(--radius-md);padding:.68rem .95rem;background:var(--accent);color:white;font-weight:700;cursor:pointer;transition:transform var(--motion-fast) var(--ease-playful)}
 button:hover{transform:translateY(-1px)}
 button.secondary{background:color-mix(in srgb,var(--accent-2) 70%, #eee);color:var(--text)}
-.panel-card,.task-card{background:color-mix(in srgb,var(--surface) 92%, white);border:1px solid color-mix(in srgb,var(--text) 12%, transparent);border-radius:var(--radius-md);padding:var(--space-4)}
+.panel-card,.task-card{background:color-mix(in srgb,var(--surface) 96%, white);border:1px solid color-mix(in srgb,var(--text) 10%, transparent);border-radius:var(--radius-md);padding:var(--space-4)}
 .section-block{margin-top:var(--space-4)}
 .status-list{list-style:none;padding:0;margin:0;display:grid;gap:var(--space-2)}
 .status-list li{display:flex;justify-content:space-between;gap:.6rem;padding:.6rem;border-radius:12px;background:rgba(255,255,255,.55)}
@@ -56,9 +56,10 @@ button.secondary{background:color-mix(in srgb,var(--accent-2) 70%, #eee);color:v
 @media (max-width:900px){.dashboard-layout{grid-template-columns:1fr}.floating-nav{position:sticky;top:4.6rem;flex-direction:row;flex-wrap:wrap}.floating-nav .nav-link{width:auto}}
 @media (max-width:700px){.container{width:95vw}.card{padding:1rem}.app-header{flex-direction:column}.floating-nav{position:static}}
 
-.signup-highlight{position:relative;overflow:hidden}
+.signup-highlight{position:relative;overflow:hidden;background:color-mix(in srgb,var(--surface) 92%, var(--accent-2) 8%);border-color:color-mix(in srgb,var(--accent) 16%, transparent)}
 .signup-highlight::before{content:"";position:absolute;inset:auto -40px -40px auto;width:160px;height:160px;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 35%, transparent),transparent 68%)}
 .signup-benefits{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .9rem}
+.centered-setup-button{display:block;margin:0 auto}
 .header-actions .nav-link{background:color-mix(in srgb,var(--surface) 86%, var(--accent) 14%)}
 
 
