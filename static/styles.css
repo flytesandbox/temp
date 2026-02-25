@@ -55,3 +55,8 @@ button.secondary{background:color-mix(in srgb,var(--accent-2) 70%, #eee);color:v
 .compact-list li{display:list-item;background:none}
 @media (max-width:900px){.dashboard-layout{grid-template-columns:1fr}.floating-nav{position:sticky;top:4.6rem;flex-direction:row;flex-wrap:wrap}.floating-nav .nav-link{width:auto}}
 @media (max-width:700px){.container{width:95vw}.card{padding:1rem}.app-header{flex-direction:column}.floating-nav{position:static}}
+
+.signup-highlight{position:relative;overflow:hidden}
+.signup-highlight::before{content:"";position:absolute;inset:auto -40px -40px auto;width:160px;height:160px;background:radial-gradient(circle,color-mix(in srgb,var(--accent) 35%, transparent),transparent 68%)}
+.signup-benefits{display:flex;gap:.5rem;flex-wrap:wrap;margin:.55rem 0 .9rem}
+.header-actions .nav-link{background:color-mix(in srgb,var(--surface) 86%, var(--accent) 14%)}
