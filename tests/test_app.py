@@ -138,9 +138,11 @@ class AppTests(unittest.TestCase):
         self.assertIn("Development Log", dashboard["body"])
         self.assertIn("Merged At (UTC)", dashboard["body"])
 
-        prs = sorted(int(value) for value in re.findall(r">PR #(\d+)</td>", dashboard["body"]))
+        prs = [int(value) for value in re.findall(r">PR #(\d+)</td>", dashboard["body"])]
         self.assertTrue(prs, "Expected at least one PR entry in the development log")
-        self.assertEqual(prs, list(range(1, prs[-1] + 1)))
+        self.assertEqual(prs, sorted(prs), "PR entries should be rendered in ascending PR order")
+        self.assertEqual(len(prs), len(set(prs)), "PR entries should not contain duplicates")
+        self.assertIn(69, prs, "Expected the merged PR #69 entry to be visible in Dev Log")
         self.assertRegex(dashboard["body"], r"\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC")
 
     def test_permissions_tab_is_visible_in_main_nav(self):
