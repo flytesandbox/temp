@@ -791,7 +791,7 @@ class TaskTrackerApp:
             """
             SELECT id, username, role, is_active, team_id, is_team_admin, is_team_super_admin
             FROM users
-            WHERE role != 'super_admin'
+            WHERE role IN ('admin', 'broker')
             ORDER BY is_active DESC, username ASC
             """
         ).fetchall()
@@ -1609,7 +1609,7 @@ class TaskTrackerApp:
               <div class='new-ui-row-list'>
                 <a class='new-ui-row' href='/?view=application'><strong>ICHRA Setup Workspace</strong><span>Open forms and submission workflow</span></a>
                 <a class='new-ui-row' href='/?view=employers'><strong>Employers</strong><span>Manage employer roster and ownership</span></a>
-                <a class='new-ui-row' href='/?view=users'><strong>Users</strong><span>Provision admins, brokers, and employers</span></a>
+                <a class='new-ui-row' href='/?view=users'><strong>Users</strong><span>Provision admins and brokers (employers are created in Employers workflow)</span></a>
                 <a class='new-ui-row' href='/?view=system'><strong>System</strong><span>Review teams, logs, and control panels</span></a>
               </div>
             </section>
@@ -1643,6 +1643,9 @@ class TaskTrackerApp:
         if not user:
             db.close()
             raise ValueError("User not found")
+        if user["role"] == "employer" or role == "employer":
+            db.close()
+            raise ValueError("Employer accounts must be managed from Employer settings.")
         password_hash = hash_password(password) if password else user["password_hash"]
         db.execute(
             "UPDATE users SET username = ?, display_name = ?, role = ?, password_hash = ?, password_hint = ?, must_change_password = ?, is_active = ?, is_team_admin = CASE WHEN ? = 'broker' AND is_team_admin = 1 THEN 1 ELSE 0 END, is_team_super_admin = CASE WHEN ? IN ('admin', 'broker') AND is_team_super_admin = 1 THEN 1 ELSE 0 END WHERE id = ?",
@@ -1940,12 +1943,12 @@ class TaskTrackerApp:
         username = form.get("username", "").strip().lower()
         role = form.get("role", "admin")
         capabilities = self.capability_flags_for_user(session_user)
-        if session_user["role"] == "broker" and not capabilities["team.staff_provision"] and role != "employer":
-            return self.redirect(start_response, "/", flash=("error", "Brokers can only create employer users assigned to their team scope."))
+        if role == "employer":
+            return self.redirect(start_response, "/", flash=("error", "Employer accounts are created from the Employers workflow."))
+        if session_user["role"] == "broker" and not capabilities["team.staff_provision"]:
+            return self.redirect(start_response, "/", flash=("error", "Brokers need team-super-admin access to provision team staff users."))
         if role in {"admin", "broker"} and not capabilities["team.staff_provision"]:
             return self.redirect(start_response, "/", flash=("error", "You do not have permission to provision team staff users."))
-        if role == "employer" and not capabilities["employer.user_admin"]:
-            return self.redirect(start_response, "/", flash=("error", "You do not have permission to provision employer users."))
         is_team_super_admin = self.is_team_super_admin_user(session_user)
         creator_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         role_level = ROLE_LEVELS.get(role, -1)
@@ -1981,11 +1984,13 @@ class TaskTrackerApp:
         password = form.get("password", "")
         is_active = 1 if form.get("is_active", "1") == "1" else 0
         capabilities = self.capability_flags_for_user(session_user)
+        if role == "employer":
+            return self.redirect(start_response, "/", flash=("error", "Employer accounts are managed from Employer settings."))
         is_team_super_admin = self.is_team_super_admin_user(session_user)
         actor_level = ROLE_LEVELS.get("admin", -1) if is_team_super_admin else ROLE_LEVELS.get(session_user["role"], -1)
         target_level = ROLE_LEVELS.get(role, -1)
-        if session_user["role"] == "broker" and not capabilities["team.staff_provision"] and role != "employer":
-            return self.redirect(start_response, "/", flash=("error", "Brokers can only manage employer users."))
+        if session_user["role"] == "broker" and not capabilities["team.staff_provision"]:
+            return self.redirect(start_response, "/", flash=("error", "Brokers need team-super-admin access to manage team staff users."))
         if role in {"admin", "broker"} and not capabilities["team.staff_provision"]:
             return self.redirect(start_response, "/", flash=("error", "You do not have permission to manage team staff users."))
         if target_level < 0:
@@ -1994,6 +1999,8 @@ class TaskTrackerApp:
             return self.redirect(start_response, "/", flash=("error", "You can only assign roles below your own."))
 
         target_user = self.get_user_by_id(user_id)
+        if target_user and target_user["role"] == "employer":
+            return self.redirect(start_response, "/", flash=("error", "Employer accounts are managed from Employer settings."))
         if not self.can_manage_user(session_user, target_user):
             return self.redirect(start_response, "/", flash=("error", "That user is outside your team scope."))
         if len(username) < 3:
@@ -2002,8 +2009,8 @@ class TaskTrackerApp:
         try:
             self.admin_update_user(user_id, username, role, password, is_active)
             self.log_action(session_user["id"], "user_updated", "user", user_id, username, f"role={role}")
-        except ValueError:
-            return self.redirect(start_response, "/", flash=("error", "User no longer exists."))
+        except ValueError as exc:
+            return self.redirect(start_response, "/", flash=("error", str(exc)))
         except sqlite3.IntegrityError:
             return self.redirect(start_response, "/", flash=("error", "Cannot update user to that username."))
         return self.redirect(start_response, "/", flash=("success", "User updated."))
@@ -2465,9 +2472,9 @@ class TaskTrackerApp:
         matrix_rows = [
             (
                 "Account lifecycle management",
-                "Can create/update admin, broker, and employer users across teams (except other super admins).",
-                "Can create/update admin, broker, and employer users inside their assigned team.",
-                "Can create/update employer users only inside their assigned team; cannot provision broker peers.",
+                "Can create/update admin and broker users across teams (except other super admins); employer accounts are managed via Employers.",
+                "Can create/update admin and broker users inside their assigned team; employer accounts are managed via Employers.",
+                "Can create/update broker users only when designated as team super admin; employer accounts are managed via Employers.",
                 "Can only update their own profile and password.",
             ),
             (
@@ -2669,9 +2676,9 @@ class TaskTrackerApp:
 
             user_settings_modals = ""
             if role == "broker":
-                editable_role_options = ["broker", "employer"]
+                editable_role_options = ["broker"]
             else:
-                editable_role_options = ["admin", "broker", "employer"]
+                editable_role_options = ["admin", "broker"]
             user_rows = "".join(
                 f"""
                 <tr>
@@ -2718,7 +2725,7 @@ class TaskTrackerApp:
                 """
                 for row in users_for_admin
             )
-            create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option><option value='employer'>employer</option>" if role != "broker" else "<option value='broker'>broker</option><option value='employer'>employer</option>"
+            create_role_options = "<option value='admin'>admin</option><option value='broker'>broker</option>" if role != "broker" else "<option value='broker'>broker</option>"
             create_team_options = "".join(f"<option value='{row['id']}'>{html.escape(row['name'])}</option>" for row in self.list_teams())
             create_team_select = f"<select name='team_id' required><option value=''>Select team</option>{create_team_options}</select>" if role == "super_admin" else ""
             broker_admin_section = f"""
