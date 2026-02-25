@@ -2808,12 +2808,15 @@ class TaskTrackerApp:
         if selected_team:
             members = self.list_active_users_for_team(selected_team['id'])
             team_focus_summary = f"""
-            <div class='stats-grid'>
-              <article class='panel-card'><h4>Team in Focus</h4><p>{selected_team_name}</p></article>
-              <article class='panel-card'><h4>Admins</h4><p>{selected_team['admin_count']}</p></article>
-              <article class='panel-card'><h4>Brokers</h4><p>{selected_team['broker_count']}</p></article>
-              <article class='panel-card'><h4>Employers</h4><p>{selected_team['employer_count']}</p></article>
-            </div>
+            <section class='team-focus-summary'>
+              <h4>Team Snapshot</h4>
+              <div class='team-focus-metrics'>
+                <article><span>Team in Focus</span><strong>{selected_team_name}</strong></article>
+                <article><span>Admins</span><strong>{selected_team['admin_count']}</strong></article>
+                <article><span>Brokers</span><strong>{selected_team['broker_count']}</strong></article>
+                <article><span>Employers</span><strong>{selected_team['employer_count']}</strong></article>
+              </div>
+            </section>
             """
             team_member_rows = "".join(
                 f"<tr><td>{html.escape(member['display_name'])}</td><td>{html.escape(member['username'])}</td><td>{html.escape(member['role'])}</td><td>{'Yes' if ('is_team_super_admin' in member.keys() and member['is_team_super_admin']) else 'No'}</td></tr>"
@@ -3172,17 +3175,19 @@ class TaskTrackerApp:
                   <h1>{html.escape(role_title)}</h1>
                   <p class='subtitle'>Welcome, {html.escape(user['display_name'])}</p>
                 </div>
-                <div class='header-actions'>
-                  {header_primary_cta}
-                  {self.render_ui_mode_toggle(user, active_view)}
-                  {"<a class='header-action-btn' href='/?view=settings'>Settings</a>" if show_settings else ''}
-                  <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
+                <div class='header-controls'>
+                  <div class='header-actions'>
+                    {header_primary_cta}
+                    {self.render_ui_mode_toggle(user, active_view)}
+                    {"<a class='header-action-btn' href='/?view=settings'>Settings</a>" if show_settings else ''}
+                    <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
+                  </div>
+                  <div class='welcome-banner compact-banner'>Theme: {theme_variant.title()} · Vibe pack: {vibe_pack.title()} · Layout seed: {html.escape(personalization['seed'][:8])}</div>
                 </div>
               </header>
               <div class='dashboard-layout'>
                 <nav class='dashboard-nav floating-nav'>{nav_html}</nav>
                 <div class='dashboard-content'>
-                  <div class='welcome-banner'>Theme: {theme_variant.title()} · Vibe pack: {vibe_pack.title()} · Layout seed: {html.escape(personalization['seed'][:8])}</div>
                   {active_panel}
                 </div>
               </div>
