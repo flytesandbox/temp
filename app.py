@@ -2545,9 +2545,9 @@ class TaskTrackerApp:
         team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
 
         employers = self.list_visible_employers(user)
-        employers_scope = query.get("employers_scope", ["active"])[0] if query else "active"
+        employers_scope = query.get("employers_scope", ["all"])[0] if query else "all"
         if employers_scope not in {"active", "all", "inactive"}:
-            employers_scope = "active"
+            employers_scope = "all"
         if role == "employer":
             visible_employer_rows = employers
         elif employers_scope == "all":
@@ -2603,8 +2603,6 @@ class TaskTrackerApp:
         nav_links = [("dashboard", "Dashboard")]
         if show_application:
             nav_links.append(("application", "ICHRA Setup Workspace"))
-        if role in {"super_admin", "admin", "broker"}:
-            nav_links.append(("employers", "Employers"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         nav_links.append(("permissions", "Permissions"))
@@ -2910,6 +2908,7 @@ class TaskTrackerApp:
         team_panel = f"""
             <nav class='dashboard-nav sub-nav'>
               <a class='nav-link {'active' if query.get('team_section', [''])[0] != 'account-management' else ''}' href='/?view=team{f"&team_id={selected_team['id']}" if selected_team else ""}'>Team Workspace</a>
+              <a class='nav-link {'active' if active_view == 'employers' else ''}' href='/?view=employers&employers_scope=all'>Employers</a>
               <a class='nav-link {'active' if query.get('team_section', [''])[0] == 'account-management' else ''}' href='/?view=team&team_section=account-management'>Account Management</a>
             </nav>
             {broker_admin_section if query.get('team_section', [''])[0] == 'account-management' else team_workspace_panel}

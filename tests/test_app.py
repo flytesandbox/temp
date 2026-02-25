@@ -296,7 +296,7 @@ class AppTests(unittest.TestCase):
         login_broker = call_app(self.app, method="POST", path="/login", body="username=teamscopebroker&password=user")
         broker_cookie = merge_cookies(broker_cookie, login_broker["headers"])
 
-        employers_view = call_app(self.app, method="GET", path="/", cookie_header=broker_cookie, query_string="view=employers&employers_scope=active")
+        employers_view = call_app(self.app, method="GET", path="/", cookie_header=broker_cookie, query_string="view=employers")
         application_view = call_app(self.app, method="GET", path="/", cookie_header=broker_cookie, query_string="view=application")
 
         self.assertIn("Teamwide Employer", employers_view["body"])
@@ -757,6 +757,12 @@ class AppTests(unittest.TestCase):
         view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
         self.assertIn("Team", view["body"])
         self.assertIn("Account Management", view["body"])
+        self.assertIn("href='/?view=employers&employers_scope=all'", view["body"])
+
+        nav_start = view["body"].find("<nav class='dashboard-nav floating-nav'>")
+        nav_end = view["body"].find("</nav>", nav_start)
+        floating_nav = view["body"][nav_start:nav_end]
+        self.assertNotIn("href='/?view=employers'", floating_nav)
 
     def test_broker_referral_notifies_employer_and_sets_ichra_started(self):
         admin_cookie = ""
