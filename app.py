@@ -737,21 +737,25 @@ class TaskTrackerApp:
             "assigned_employer_ids": assigned_employer_ids,
         }
 
-    def get_users_with_completion(self, session_user=None):
+    def get_users_with_completion(self, session_user=None, include_employers: bool = False):
         db = self.db()
         rows = db.execute(
             """
             SELECT u.id, u.username, u.display_name, u.role, u.created_by_user_id, u.team_id,
                    u.is_active,
+                   e.legal_name AS employer_legal_name,
                    CASE WHEN tc.id IS NULL THEN 0 ELSE 1 END AS completed
             FROM users u
+            LEFT JOIN employers e ON e.linked_user_id = u.id
             LEFT JOIN task_completions tc
                 ON tc.user_id = u.id AND tc.task_id = 1
-            WHERE u.role != 'employer' AND u.is_active = 1
+            WHERE u.is_active = 1
             ORDER BY u.id
             """
         ).fetchall()
         db.close()
+        if not include_employers:
+            rows = [row for row in rows if row["role"] != "employer"]
         if session_user:
             rows = self.filter_users_for_scope(session_user, rows, include_super_admin=(session_user['role'] == 'super_admin'))
         return rows
@@ -1081,19 +1085,41 @@ class TaskTrackerApp:
                 (session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
             ).fetchall()
         elif session_user["role"] == "broker":
-            rows = db.execute(
-                """
-                SELECT e.*, u.username AS portal_username,
-                       COALESCE(u.is_active, 0) AS portal_user_is_active,
-                       broker.username AS broker_username
-                FROM employers e
-                LEFT JOIN users u ON u.id = e.linked_user_id
-                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
-                WHERE e.broker_user_id = ?
-                ORDER BY e.created_at DESC
-                """,
-                (session_user["id"],),
-            ).fetchall()
+            if session_user["is_team_super_admin"] == 1:
+                rows = db.execute(
+                    """
+                    SELECT e.*, u.username AS portal_username,
+                           COALESCE(u.is_active, 0) AS portal_user_is_active,
+                           broker.username AS broker_username
+                    FROM employers e
+                    LEFT JOIN users u ON u.id = e.linked_user_id
+                    LEFT JOIN users broker ON broker.id = e.broker_user_id
+                    LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id
+                    LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id
+                    WHERE (
+                        e.broker_user_id = ?
+                        OR (owner_admin.team_id IS NOT NULL AND owner_admin.team_id = ?)
+                        OR (broker.team_id IS NOT NULL AND broker.team_id = ?)
+                        OR (employer_user.team_id IS NOT NULL AND employer_user.team_id = ?)
+                    )
+                    ORDER BY e.created_at DESC
+                    """,
+                    (session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """
+                    SELECT e.*, u.username AS portal_username,
+                           COALESCE(u.is_active, 0) AS portal_user_is_active,
+                           broker.username AS broker_username
+                    FROM employers e
+                    LEFT JOIN users u ON u.id = e.linked_user_id
+                    LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
+                    WHERE e.broker_user_id = ?
+                    ORDER BY e.created_at DESC
+                    """,
+                    (session_user["id"],),
+                ).fetchall()
         elif session_user["role"] == "employer":
             rows = db.execute(
                 """
@@ -2888,9 +2914,9 @@ class TaskTrackerApp:
             {broker_admin_section if query.get('team_section', [''])[0] == 'account-management' else team_workspace_panel}
         """
 
-        notification_targets = self.get_users_with_completion(user)
+        notification_targets = self.get_users_with_completion(user, include_employers=True)
         notification_target_options = "".join(
-            f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
+            f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])}{' · ' + html.escape(row['employer_legal_name']) if row['employer_legal_name'] else ''})</option>"
             for row in notification_targets
         )
         notification_rows = "".join(
