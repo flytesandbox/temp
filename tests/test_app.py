@@ -1499,5 +1499,46 @@ class AppTests(unittest.TestCase):
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
 
+    def test_super_admin_sees_new_ui_toggle_only_on_dashboard(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertIn("action='/settings/ui-mode'", dashboard["body"])
+        self.assertIn("New UI", dashboard["body"])
+
+        users_view = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=application")
+        self.assertNotIn("action='/settings/ui-mode'", users_view["body"])
+
+    def test_non_super_admin_never_sees_new_ui_toggle(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertNotIn("action='/settings/ui-mode'", dashboard["body"])
+
+    def test_super_admin_can_toggle_new_ui_and_preference_persists(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        toggle_on = call_app(
+            self.app,
+            method="POST",
+            path="/settings/ui-mode",
+            body="view=dashboard&ui_mode=NEW",
+            cookie_header=cookie,
+        )
+        self.assertEqual(dict(toggle_on["headers"]).get("Location"), "/?view=dashboard")
+
+        dashboard_new = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertIn("new-ui-shell", dashboard_new["body"])
+
+        db = self.app.db()
+        user = db.execute("SELECT ui_mode FROM users WHERE username = 'admin'").fetchone()
+        db.close()
+        self.assertEqual(user["ui_mode"], "NEW")
+
+
+
 if __name__ == "__main__":
     unittest.main()

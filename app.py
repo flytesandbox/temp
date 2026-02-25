@@ -16,6 +16,7 @@ DEFAULT_DB = BASE_DIR / "app.db"
 PROCESS_SECRET_KEY = os.environ.get("SECRET_KEY") or os.urandom(32).hex()
 ALLOWED_THEMES = {"default", "sunset", "midnight", "dawn", "mint", "lavender"}
 ALLOWED_DENSITIES = {"comfortable", "compact"}
+ALLOWED_UI_MODES = {"LEGACY", "NEW"}
 ROLE_LEVELS = {"employer": 0, "broker": 1, "admin": 2, "super_admin": 3}
 CAPABILITY_KEYS = {
     "platform.audit_view_all",
@@ -131,6 +132,7 @@ class TaskTrackerApp:
                 is_team_super_admin INTEGER NOT NULL DEFAULT 0,
                 theme TEXT NOT NULL DEFAULT 'default',
                 density TEXT NOT NULL DEFAULT 'comfortable',
+                ui_mode TEXT NOT NULL DEFAULT 'LEGACY',
                 created_by_user_id INTEGER,
                 last_login_at TEXT,
                 must_change_password INTEGER NOT NULL DEFAULT 1,
@@ -257,6 +259,8 @@ class TaskTrackerApp:
             db.execute("ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT 'default'")
         if "density" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN density TEXT NOT NULL DEFAULT 'comfortable'")
+        if "ui_mode" not in columns:
+            db.execute("ALTER TABLE users ADD COLUMN ui_mode TEXT NOT NULL DEFAULT 'LEGACY'")
         if "created_by_user_id" not in columns:
             db.execute("ALTER TABLE users ADD COLUMN created_by_user_id INTEGER")
         if "last_login_at" not in columns:
@@ -459,7 +463,9 @@ class TaskTrackerApp:
         if path == "/":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            return self.render_dashboard(start_response, session_user, self.consume_flash(cookie), query.get("view", ["dashboard"])[0], query)
+            active_view = query.get("view", ["dashboard"])[0]
+            flash_message = self.consume_flash(cookie)
+            return self.render_ui_mode_router(start_response, session_user, flash_message, active_view, query)
 
         if path == "/me/access" and method == "GET":
             if not session_user:
@@ -512,6 +518,11 @@ class TaskTrackerApp:
             if not session_user:
                 return self.redirect(start_response, "/login")
             return self.handle_preferences_settings(start_response, session_user, self.parse_form(environ))
+
+        if path == "/settings/ui-mode" and method == "POST":
+            if not session_user:
+                return self.redirect(start_response, "/login")
+            return self.handle_ui_mode_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/admin/users/create" and method == "POST":
             if not session_user:
@@ -1469,6 +1480,99 @@ class TaskTrackerApp:
         db.commit()
         db.close()
 
+
+    def update_user_ui_mode(self, user_id: int, ui_mode: str):
+        if ui_mode not in ALLOWED_UI_MODES:
+            ui_mode = "LEGACY"
+        db = self.db()
+        db.execute("UPDATE users SET ui_mode = ? WHERE id = ?", (ui_mode, user_id))
+        db.commit()
+        db.close()
+
+    def effective_ui_mode(self, user):
+        preferred_mode = user["ui_mode"] if "ui_mode" in user.keys() and user["ui_mode"] in ALLOWED_UI_MODES else "LEGACY"
+        if preferred_mode == "NEW" and user["role"] != "super_admin":
+            self.update_user_ui_mode(user["id"], "LEGACY")
+            return "LEGACY"
+        return preferred_mode
+
+    def render_ui_mode_toggle(self, user, active_view: str):
+        if user["role"] != "super_admin" or active_view not in {"dashboard", "home"}:
+            return ""
+        checked = "checked" if self.effective_ui_mode(user) == "NEW" else ""
+        return f"""
+        <form method='post' action='/settings/ui-mode' class='ui-mode-toggle' aria-label='UI mode toggle form'>
+          <input type='hidden' name='view' value='{html.escape(active_view)}' />
+          <input type='hidden' name='ui_mode' value="{'LEGACY' if checked else 'NEW'}" />
+          <label class='toggle-switch' aria-label='New UI'>
+            <input type='checkbox' role='switch' aria-label='New UI' {checked} onchange="this.form.ui_mode.value=this.checked?'NEW':'LEGACY'; this.form.submit();" />
+            <span>New UI</span>
+          </label>
+        </form>
+        """
+
+    def render_ui_mode_router(self, start_response, user, flash_message, active_view, query):
+        ui_mode = self.effective_ui_mode(user)
+        if ui_mode == "NEW":
+            try:
+                return self.render_new_ui_app(start_response, user, flash_message, active_view, query)
+            except Exception:
+                self.update_user_ui_mode(user["id"], "LEGACY")
+                self.log_action(user["id"], "ui_mode_fallback", "user", user["id"], user["username"], f"route={active_view};from=NEW;to=LEGACY")
+                fallback_flash = ("error", "New UI is temporarily unavailable. Switched back to Legacy UI.")
+                return self.render_dashboard(start_response, user, fallback_flash, active_view, query)
+        return self.render_dashboard(start_response, user, flash_message, active_view, query)
+
+    def render_new_ui_app(self, start_response, user, flash_message, active_view, query):
+        if user["role"] == "super_admin" and active_view in {"dashboard", "home"}:
+            return self.render_super_admin_new_ui_dashboard(start_response, user, flash_message)
+        return self.render_dashboard(start_response, user, flash_message, active_view, query)
+
+    def render_super_admin_new_ui_dashboard(self, start_response, user, flash_message):
+        notifications = self.list_notifications(user["id"])
+        unseen_count = sum(1 for item in notifications if not item["seen"])
+        employers = self.list_visible_employers(user)
+        active_employer_count = sum(1 for row in employers if row["portal_user_is_active"])
+        onboarding_count = sum(1 for row in employers if not row["application_complete"])
+        tasks = self.list_visible_team_tasks(user)
+        open_tasks = sum(1 for row in tasks if row["status"] != "completed")
+        toggle = self.render_ui_mode_toggle(user, "dashboard")
+        body = self.flash_html(flash_message) + f"""
+          <section class='new-ui-shell app-shell'>
+            <header class='new-ui-header'>
+              <div>
+                <h1>Super Admin Dashboard</h1>
+                <p class='subtitle'>New UI preview mode with legacy-safe route fallback.</p>
+              </div>
+              <div class='header-actions'>
+                {toggle}
+                <a class='header-action-btn' href='/?view=settings'>Settings</a>
+                <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
+              </div>
+            </header>
+            <nav class='new-ui-breadcrumbs' aria-label='Breadcrumb'><span>Home</span><span>/</span><span>Dashboard</span></nav>
+            <div class='new-ui-grid'>
+              <article class='new-ui-card'><h3>Scoped Employers</h3><p class='new-ui-metric'>{len(employers)}</p><p class='subtitle'>{active_employer_count} active portals</p></article>
+              <article class='new-ui-card'><h3>Open Setup Workflows</h3><p class='new-ui-metric'>{onboarding_count}</p><p class='subtitle'>Submitted + in-progress tracking</p></article>
+              <article class='new-ui-card'><h3>Team Tasks</h3><p class='new-ui-metric'>{open_tasks}</p><p class='subtitle'>Open operational tasks</p></article>
+              <article class='new-ui-card'><h3>Notifications</h3><p class='new-ui-metric'>{unseen_count}</p><p class='subtitle'>Unread alerts</p></article>
+            </div>
+            <section class='new-ui-card'>
+              <h3>Workspace Navigation</h3>
+              <div class='new-ui-row-list'>
+                <a class='new-ui-row' href='/?view=application'><strong>ICHRA Setup Workspace</strong><span>Open forms and submission workflow</span></a>
+                <a class='new-ui-row' href='/?view=employers'><strong>Employers</strong><span>Manage employer roster and ownership</span></a>
+                <a class='new-ui-row' href='/?view=users'><strong>Users</strong><span>Provision admins, brokers, and employers</span></a>
+                <a class='new-ui-row' href='/?view=system'><strong>System</strong><span>Review teams, logs, and control panels</span></a>
+              </div>
+            </section>
+          </section>
+        """
+        html_doc = self.html_page("Dashboard", body)
+        headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", self.expire_cookie_header("flash"))]
+        start_response("200 OK", headers)
+        return [html_doc.encode("utf-8")]
+
     def create_user(self, username: str, password: str, role: str, created_by_user_id: int | None = None, team_id: int | None = None):
         db = self.db()
         is_team_admin = 1 if role == "broker" and team_id is not None and db.execute(
@@ -1770,6 +1874,20 @@ class TaskTrackerApp:
         db.commit()
         db.close()
         return self.redirect(start_response, "/?view=settings", flash=("success", "Preferences updated."))
+
+
+    def handle_ui_mode_settings(self, start_response, session_user, form):
+        active_view = form.get("view", "dashboard")
+        if session_user["role"] != "super_admin" or active_view not in {"dashboard", "home"}:
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "Only Super Admins can switch UI mode from the dashboard header."))
+        requested = (form.get("ui_mode") or "LEGACY").upper()
+        if requested not in ALLOWED_UI_MODES:
+            return self.redirect(start_response, "/?view=dashboard", flash=("error", "Invalid UI mode selected."))
+        previous = self.effective_ui_mode(session_user)
+        self.update_user_ui_mode(session_user["id"], requested)
+        self.log_action(session_user["id"], "ui_mode_toggled", "user", session_user["id"], session_user["username"], f"route={active_view};previous_mode={previous};new_mode={requested}")
+        mode_label = "New UI" if requested == "NEW" else "Legacy UI"
+        return self.redirect(start_response, f"/?view={active_view}", flash=("success", f"Switched to {mode_label}."))
 
     def handle_admin_create_user(self, start_response, session_user, form):
         username = form.get("username", "").strip().lower()
@@ -3055,6 +3173,7 @@ class TaskTrackerApp:
                 </div>
                 <div class='header-actions'>
                   {header_primary_cta}
+                  {self.render_ui_mode_toggle(user, active_view)}
                   {"<a class='header-action-btn' href='/?view=settings'>Settings</a>" if show_settings else ''}
                   <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
                 </div>
