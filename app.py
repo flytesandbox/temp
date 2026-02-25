@@ -108,6 +108,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 75, "merged_at": "2026-02-25 13:42 UTC", "change": "Merged PR #75: Compact login UI, switch accents to light blue, and fix employer visibility in notifications/workspaces", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 76, "merged_at": "2026-02-25 13:54 UTC", "change": "Merged PR #76: Move Employers into Team sub-nav and fix default employer list scope", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 77, "merged_at": "2026-02-25 14:20 UTC", "change": "Merged PR #77: ICHRA Workspace: Employer Snapshot UI and active-only selector", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
+    {"pr": 78, "merged_at": "2026-02-25 14:29 UTC", "change": "Merged PR #78: Add System 'Dev Note' tab and compact Employer Snapshot tiles", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
 ]
 
 
