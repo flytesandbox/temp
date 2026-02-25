@@ -3248,17 +3248,18 @@ class TaskTrackerApp:
             return artifact_sub_nav + self.render_new_employer_setup_form()
 
         visible_employers = self.list_visible_employers(user)
-        if not visible_employers:
+        workspace_employers = [row for row in visible_employers if row["portal_user_is_active"]]
+        if not workspace_employers:
             return artifact_sub_nav + """
             <section class='section-block panel-card'>
               <h3>ICHRA Setup Application Center</h3>
-              <p class='subtitle'>Create an employer first, then initialize and manage their employer-containerized ICHRA setup workspace from here.</p>
+              <p class='subtitle'>Create and activate an employer portal first, then initialize and manage their employer-containerized ICHRA setup workspace from here.</p>
             </section>
             """
 
         if selected_employer_id is None:
-            selected_employer_id = visible_employers[0]["id"]
-        selected_employer = next((row for row in visible_employers if row["id"] == selected_employer_id), visible_employers[0])
+            selected_employer_id = workspace_employers[0]["id"]
+        selected_employer = next((row for row in workspace_employers if row["id"] == selected_employer_id), workspace_employers[0])
         selected_employer_id = selected_employer["id"]
 
         artifact = self.get_ichra_application(selected_employer_id)
@@ -3306,28 +3307,41 @@ class TaskTrackerApp:
 
         employer_options = "".join(
             f"<option value='{row['id']}' {'selected' if row['id'] == selected_employer_id else ''}>{html.escape(row['legal_name'])} ({html.escape(row['portal_username'])})</option>"
-            for row in visible_employers
+            for row in workspace_employers
         )
+
+        scope_note = ""
+        if len(workspace_employers) < len(visible_employers):
+            scope_note = (
+                "<p class='subtitle'>DevOps Note: only employers with an active portal account appear in this workspace selector. "
+                f"{len(workspace_employers)} active shown out of {len(visible_employers)} scoped employer records.</p>"
+            )
 
         return artifact_sub_nav + f"""
         <section class='section-block panel-card artifact-center'>
           <h3>ICHRA Setup Workspace</h3>
           <p class='subtitle'>Every ICHRA setup workspace is employer-owned. Start it once, save drafts anytime, and submit only when complete.</p>
-          <div class='artifact-meta-grid'>
-            <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
-            <article><h4>Application Status</h4><p>{status_label}</p></article>
-            <article><h4>Access Token</h4><p>{'Locked' if is_locked else 'Active'}</p></article>
-            <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
-          </div>
-          {renew_block}
+          <section class='workspace-employer-snapshot'>
+            <h4>Employer Snapshot</h4>
+            <form method='get' action='/' class='inline-form artifact-picker'>
+              <input type='hidden' name='view' value='application' />
+              <label>Switch employer application
+                <select name='employer_id'>{employer_options}</select>
+              </label>
+              <button type='submit' class='secondary'>Load Application</button>
+            </form>
+            <div class='artifact-meta-grid compact-meta-grid'>
+              <article><h4>Employer</h4><p>{html.escape(selected_employer['legal_name'])}</p></article>
+              <article><h4>Application Status</h4><p>{status_label}</p></article>
+              <article><h4>Access Token</h4><p>{'Locked' if is_locked else 'Active'}</p></article>
+              <article><h4>Portal User</h4><p>{html.escape(selected_employer['portal_username'])}</p></article>
+            </div>
+            {scope_note}
+          </section>
 
-          <form method='get' action='/' class='inline-form artifact-picker'>
-            <input type='hidden' name='view' value='application' />
-            <label>Switch employer application
-              <select name='employer_id'>{employer_options}</select>
-            </label>
-            <button type='submit' class='secondary'>Load Application</button>
-          </form>
+          <div class='artifact-workspace-actions'>
+            {renew_block}
+          </div>
 
           <form method='post' action='/applications/ichra/save' class='form-grid artifact-form'>
             <input type='hidden' name='employer_id' value='{selected_employer_id}' />

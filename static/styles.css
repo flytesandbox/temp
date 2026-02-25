@@ -219,4 +219,11 @@ button.secondary{background:color-mix(in srgb,var(--accent-2) 70%, #eee);color:v
 .team-focus-metrics article{padding:.38rem .48rem;border-radius:10px;background:color-mix(in srgb,var(--surface) 92%, white);border:1px solid color-mix(in srgb,var(--text) 10%, transparent)}
 .team-focus-metrics span{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
 .team-focus-metrics strong{display:block;margin-top:.1rem;font-size:.95rem}
+.workspace-employer-snapshot{margin:0 0 .8rem;padding:.55rem .7rem;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%, var(--surface));border:1px solid color-mix(in srgb,var(--accent) 20%, transparent)}
+.workspace-employer-snapshot h4{margin:0 0 .35rem;font-size:.86rem;letter-spacing:.02em;text-transform:uppercase;color:var(--muted)}
+.compact-meta-grid{gap:.45rem}
+.compact-meta-grid article{padding:.38rem .48rem;border-radius:10px;background:color-mix(in srgb,var(--surface) 92%, white);border:1px solid color-mix(in srgb,var(--text) 10%, transparent)}
+.compact-meta-grid p{margin:.1rem 0 0;font-size:.95rem}
+.artifact-workspace-actions{display:flex;justify-content:flex-end;margin-bottom:.55rem}
+.artifact-picker{margin-bottom:.45rem}
 @media (max-width:700px){.header-controls{align-items:flex-start;width:100%}.compact-banner{font-size:.7rem}}
