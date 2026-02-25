@@ -2252,23 +2252,13 @@ class TaskTrackerApp:
                 <div class='avatar-chip'>◉</div>
               </header>
 
-              <section class="section-block panel-card signup-highlight prospect-highlight">
+              <section class="section-block panel-card signup-highlight">
                 <h3>Need to create a new account?</h3>
-                <p class="subtitle">Start a secure setup for a new Employer or Broker account. We&apos;ll guide you to the right form and launch checklist next.</p>
-                <div class='signup-kpis'>
-                  <article><strong>10 min</strong><span>Average setup intake</span></article>
-                  <article><strong>24/7</strong><span>Self-serve access</span></article>
-                  <article><strong>1 Hub</strong><span>Team + compliance visibility</span></article>
-                </div>
+                <p class="subtitle">Start a secure setup for a new Employer or Broker account. We&apos;ll guide you to the right form next.</p>
                 <div class='signup-benefits'>
                   <span class='pill pending'>Employer setup form</span>
                   <span class='pill pending'>Broker setup form</span>
                   <span class='pill pending'>Guided onboarding</span>
-                  <span class='pill pending'>Progress tracking</span>
-                </div>
-                <div class='proof-points'>
-                  <p>✅ Create your first account in minutes</p>
-                  <p>✅ Keep onboarding, permissions, and activity in one place</p>
                 </div>
                 <button type="button" class="secondary centered-setup-button" data-modal-open="public-setup-modal">Start New Setup</button>
               </section>
@@ -2455,7 +2445,7 @@ class TaskTrackerApp:
         }.get(role, "")
 
         show_application = role in {"super_admin", "admin", "broker", "employer"}
-        show_settings = True
+        show_settings = role in {"super_admin", "admin", "broker", "employer"}
         capabilities = self.capability_flags_for_user(user)
         show_logs = capabilities["platform.audit_view_all"] or capabilities["team.audit_view"]
 
@@ -2751,22 +2741,28 @@ class TaskTrackerApp:
 
         team_workspace_panel = f"""
           <section class='section-block panel-card'>
-            <h3>Team Workspace Command Center</h3>
-            <p class='subtitle'>Manage one team at a time. Start with a focused team view, then update leadership, membership, and workload.</p>
+            <h3>Team Workspace</h3>
+            <p class='subtitle'>Manage one team at a time. Choose a team, review members, then apply targeted assignment updates.</p>
             {team_focus_picker}
             {team_focus_summary}
-            <div class='team-action-stack'>
-              {team_create_form}
-              {team_assign_admin_form}
-              {team_assign_user_form}
-              {team_assign_broker_admin_form}
-              {team_assign_super_admin_form}
-            </div>
+            {team_create_form}
+            {team_assign_admin_form}
+            {team_assign_user_form}
+            {team_assign_broker_admin_form}
+            {team_assign_super_admin_form}
             <div class='table-wrap'><table class='user-table'>
               <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team Super Admin</th></tr></thead>
               <tbody>{team_member_rows}</tbody>
             </table></div>
           </section>
+        """
+
+        team_panel = f"""
+            <nav class='dashboard-nav sub-nav'>
+              <a class='nav-link {'active' if query.get('team_section', [''])[0] != 'account-management' else ''}' href='/?view=team{f"&team_id={selected_team['id']}" if selected_team else ""}'>Team Workspace</a>
+              <a class='nav-link {'active' if query.get('team_section', [''])[0] == 'account-management' else ''}' href='/?view=team&team_section=account-management'>Account Management</a>
+            </nav>
+            {broker_admin_section if query.get('team_section', [''])[0] == 'account-management' else team_workspace_panel}
         """
 
         notification_targets = self.get_users_with_completion(user)
@@ -2941,16 +2937,6 @@ class TaskTrackerApp:
             </section>
         """
 
-        team_account_tools = broker_admin_section if query.get('team_section', [''])[0] == 'account-management' else ""
-        team_panel = f"""
-            {team_workspace_panel}
-            <section class='section-block'>
-              <a class='nav-link' href='/?view=team&team_section=account-management'>Account Management</a>
-            </section>
-            {team_task_engine_panel}
-            {team_account_tools}
-        """
-
         dashboard_panel = f"""
             {task_section}
             {team_task_engine_panel}
@@ -3069,7 +3055,7 @@ class TaskTrackerApp:
                 </div>
                 <div class='header-actions'>
                   {header_primary_cta}
-                  {"<a class='header-action-btn' href='/?view=settings'>⚙ Settings</a>" if show_settings else ''}
+                  {"<a class='header-action-btn' href='/?view=settings'>Settings</a>" if show_settings else ''}
                   <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
                 </div>
               </header>
