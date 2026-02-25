@@ -110,6 +110,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 77, "merged_at": "2026-02-25 14:20 UTC", "change": "Merged PR #77: ICHRA Workspace: Employer Snapshot UI and active-only selector", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 78, "merged_at": "2026-02-25 14:29 UTC", "change": "Merged PR #78: Add System 'Dev Note' tab and compact Employer Snapshot tiles", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 79, "merged_at": "2026-02-25 15:10 UTC", "change": "Fixed employer visibility scope joins so active employers consistently appear across Employers list, ICHRA workspace selectors, and notification targeting.", "result": "Active employers now populate correctly for admins and team-super brokers while preserving existing permission boundaries.", "why": "Eliminate missing-employer regressions caused by over-reliance on owner/broker team joins when created_by remained in-scope."},
+    {"pr": 80, "merged_at": "2026-02-25 15:10 UTC", "change": "Merged PR #80: Unify employer users with employer records across account workflows", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
 ]
 
 
