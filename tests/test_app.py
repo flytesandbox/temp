@@ -906,8 +906,47 @@ class AppTests(unittest.TestCase):
         self.assertIn("New Employer Setup Form", view["body"])
         self.assertIn("ICHRA Setup Workspace", view["body"])
         self.assertIn("Switch employer application", view["body"])
+        self.assertIn("Employer Snapshot", view["body"])
         self.assertIn("Save Draft", view["body"])
         self.assertIn("Submit Application", view["body"])
+
+    def test_application_workspace_employer_selector_only_lists_active_portals(self):
+        cookie = ""
+        login = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
+        cookie = merge_cookies(cookie, login["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Active+Workspace+Employer&contact_name=Jamie&work_email=jamie%40activeworkspace.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Factiveworkspace.com&state=TX"
+            ),
+            cookie_header=cookie,
+        )
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Inactive+Workspace+Employer&contact_name=Taylor&work_email=taylor%40inactiveworkspace.com&phone=555"
+                "&company_size=10&industry=Services&website=https%3A%2F%2Finactiveworkspace.com&state=TX"
+            ),
+            cookie_header=cookie,
+        )
+
+        db = self.app.db()
+        db.execute(
+            "UPDATE users SET is_active = 0 WHERE id = (SELECT linked_user_id FROM employers WHERE legal_name = 'Inactive Workspace Employer')"
+        )
+        db.commit()
+        db.close()
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=application", cookie_header=cookie)
+        self.assertIn("Active Workspace Employer", view["body"])
+        self.assertNotIn("Inactive Workspace Employer", view["body"])
+        self.assertIn("DevOps Note: only employers with an active portal account appear in this workspace selector.", view["body"])
 
     def test_application_view_supports_new_employer_setup_form_sub_nav(self):
         cookie = ""
