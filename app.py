@@ -2876,55 +2876,83 @@ class TaskTrackerApp:
                 for member in members
             ) or "<tr><td colspan='4'>No users in this team yet.</td></tr>"
 
-        team_focus_picker = ""
-        team_create_form = ""
-        team_assign_admin_form = ""
-        team_assign_user_form = ""
-        team_assign_broker_admin_form = ""
-        team_assign_super_admin_form = ""
+        team_workflow_actions = ""
         if role == "super_admin":
             team_focus_picker = (
-                "<form method='get' action='/' class='inline-form'><input type='hidden' name='view' value='team' />"
+                "<form method='get' action='/' class='workflow-form'><input type='hidden' name='view' value='team' />"
+                "<label>"
+                "<span>Team in focus</span>"
                 f"<select name='team_id'><option value=''>Select team</option>{scoped_team_options}</select>"
+                "</label>"
                 "<button type='submit' class='secondary'>Focus Team</button></form>"
             )
-            team_create_form = "<form method='post' action='/teams/create' class='inline-form'><input name='name' placeholder='new team name' required minlength='3' /><button type='submit'>Create Team</button></form>"
+            team_create_form = (
+                "<form method='post' action='/teams/create' class='workflow-form'>"
+                "<label><span>New team name</span><input name='name' placeholder='new team name' required minlength='3' /></label>"
+                "<button type='submit'>Create Team</button></form>"
+            )
             team_assign_admin_form = (
-                "<form method='post' action='/teams/assign-admin' class='inline-form'>"
-                f"<select name='admin_user_id' required><option value=''>Select admin</option>{scoped_admin_options}</select>"
-                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                "<form method='post' action='/teams/assign-admin' class='workflow-form'>"
+                f"<label><span>Admin user</span><select name='admin_user_id' required><option value=''>Select admin</option>{scoped_admin_options}</select></label>"
+                f"<label><span>Team</span><select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select></label>"
                 "<button type='submit'>Assign Admin to Team</button></form>"
             )
             team_assign_user_form = (
-                "<form method='post' action='/teams/assign-user' class='inline-form'>"
-                f"<select name='user_id' required><option value=''>Select user</option>{scoped_assignable_user_options}</select>"
-                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                "<form method='post' action='/teams/assign-user' class='workflow-form'>"
+                f"<label><span>User</span><select name='user_id' required><option value=''>Select user</option>{scoped_assignable_user_options}</select></label>"
+                f"<label><span>Team</span><select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select></label>"
                 "<button type='submit'>Assign User to Team</button></form>"
             )
             team_assign_broker_admin_form = (
-                "<form method='post' action='/teams/assign-broker-admin' class='inline-form'>"
-                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
-                f"<select name='broker_user_id' required><option value=''>Select broker</option>{scoped_broker_options}</select>"
+                "<form method='post' action='/teams/assign-broker-admin' class='workflow-form'>"
+                f"<label><span>Team</span><select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select></label>"
+                f"<label><span>Broker admin</span><select name='broker_user_id' required><option value=''>Select broker</option>{scoped_broker_options}</select></label>"
                 "<button type='submit'>Set Team Broker Admin</button></form>"
             )
             team_assign_super_admin_form = (
-                "<form method='post' action='/teams/assign-team-super-admin' class='inline-form'>"
-                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
-                f"<select name='user_id' required><option value=''>Select admin or broker</option>{scoped_team_super_admin_options}</select>"
+                "<form method='post' action='/teams/assign-team-super-admin' class='workflow-form'>"
+                f"<label><span>Team</span><select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select></label>"
+                f"<label><span>Team super admin</span><select name='user_id' required><option value=''>Select admin or broker</option>{scoped_team_super_admin_options}</select></label>"
                 "<button type='submit'>Set Team Super Admin</button></form>"
             )
+            team_workflow_actions = f"""
+            <section class='team-workflow'>
+              <header class='team-workflow-header'>
+                <h4>Team Assignment Workflow</h4>
+                <p>Follow the steps in order to keep team mapping predictable and avoid duplicate assignment work.</p>
+              </header>
+              <div class='team-workflow-grid'>
+                <article class='team-workflow-step'>
+                  <p class='team-workflow-kicker'>Step 1</p>
+                  <h5>Choose or create the team</h5>
+                  <p>Set the active context first, then create missing teams.</p>
+                  {team_focus_picker}
+                  {team_create_form}
+                </article>
+                <article class='team-workflow-step'>
+                  <p class='team-workflow-kicker'>Step 2</p>
+                  <h5>Map users and admins</h5>
+                  <p>Attach people to the right team before applying elevated controls.</p>
+                  {team_assign_user_form}
+                  {team_assign_admin_form}
+                </article>
+                <article class='team-workflow-step'>
+                  <p class='team-workflow-kicker'>Step 3</p>
+                  <h5>Apply role controls</h5>
+                  <p>Finalize ownership with broker admin and team super admin privileges.</p>
+                  {team_assign_broker_admin_form}
+                  {team_assign_super_admin_form}
+                </article>
+              </div>
+            </section>
+            """
 
         team_workspace_panel = f"""
           <section class='section-block panel-card'>
             <h3>Team Workspace</h3>
-            <p class='subtitle'>Manage one team at a time. Choose a team, review members, then apply targeted assignment updates.</p>
-            {team_focus_picker}
+            <p class='subtitle'>Manage one team at a time. Review the snapshot, run the workflow, then validate membership below.</p>
             {team_focus_summary}
-            {team_create_form}
-            {team_assign_admin_form}
-            {team_assign_user_form}
-            {team_assign_broker_admin_form}
-            {team_assign_super_admin_form}
+            {team_workflow_actions}
             <div class='table-wrap'><table class='user-table'>
               <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team Super Admin</th></tr></thead>
               <tbody>{team_member_rows}</tbody>
