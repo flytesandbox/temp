@@ -256,6 +256,61 @@ class AppTests(unittest.TestCase):
         self.assertIn("Bluebird Manufacturing", notifications_view["body"])
         self.assertIn("(employer", notifications_view["body"])
 
+
+    def test_admin_employer_visibility_includes_created_by_scope_even_without_owner_or_team_links(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_employer = call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Scope+Anchor+Employer&contact_name=Taylor+Case&work_email=taylor%40anchor.com"
+                "&phone=555-2211&company_size=10&industry=Services&website=https%3A%2F%2Fanchor.example&state=TX"
+            ),
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_employer["headers"]).get("Location"), "/?view=employers")
+
+        db = self.app.db()
+        employer = db.execute("SELECT id, linked_user_id FROM employers WHERE legal_name = 'Scope Anchor Employer'").fetchone()
+        db.execute("UPDATE employers SET primary_user_id = NULL, broker_user_id = NULL WHERE id = ?", (employer["id"],))
+        db.execute("UPDATE users SET team_id = 999 WHERE id = ?", (employer["linked_user_id"],))
+        db.commit()
+        admin_user = db.execute("SELECT * FROM users WHERE username = 'alex'").fetchone()
+        db.close()
+
+        visible = self.app.list_visible_employers(admin_user)
+        self.assertIn("Scope Anchor Employer", [row["legal_name"] for row in visible])
+
+    def test_notifications_include_active_visible_employer_even_if_employer_team_differs(self):
+        admin_cookie = ""
+        login_admin = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
+        admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
+
+        create_employer = call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Cross+Team+Notify&contact_name=Riley+Stone&work_email=riley%40notify.com"
+                "&phone=555-1010&company_size=55&industry=Retail&website=https%3A%2F%2Fnotify.example&state=CA"
+            ),
+            cookie_header=admin_cookie,
+        )
+        self.assertEqual(dict(create_employer["headers"]).get("Location"), "/?view=employers")
+
+        db = self.app.db()
+        employer = db.execute("SELECT linked_user_id FROM employers WHERE legal_name = 'Cross Team Notify'").fetchone()
+        db.execute("UPDATE users SET team_id = 777 WHERE id = ?", (employer["linked_user_id"],))
+        db.commit()
+        db.close()
+
+        notifications_view = call_app(self.app, method="GET", path="/", cookie_header=admin_cookie, query_string="view=notifications")
+        self.assertIn("Cross Team Notify", notifications_view["body"])
+
     def test_team_super_admin_broker_gets_team_employer_visibility(self):
         admin_cookie = ""
         login_admin = call_app(self.app, method="POST", path="/login", body="username=alex&password=user")
