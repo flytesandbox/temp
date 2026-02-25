@@ -2904,7 +2904,7 @@ class TaskTrackerApp:
         devlog_panel = f"""
             <section class='section-block'>
               <h3>Development Log</h3>
-              <p class='subtitle'>A running history of merged PRs, merge timestamps, what changed, outcomes, and rationale. Add a new dated entry for each successful merge going forward.</p>
+              <p class='subtitle'>A running history of merged PRs, merge timestamps, what changed, outcomes, and rationale. Entries are auto-recorded for every merged PR going forward.</p>
               <div class='table-wrap'><table class='user-table'>
                 <thead><tr><th>PR</th><th>Merged At (UTC)</th><th>What Changed</th><th>Result</th><th>Why</th></tr></thead>
                 <tbody>{devlog_rows}</tbody>

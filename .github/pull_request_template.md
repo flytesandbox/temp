@@ -5,4 +5,4 @@
 - 
 
 ## Process Checklist
-- [ ] I added/updated the matching entry in the in-app Development Log (`DEV_LOG_ENTRIES` in `app.py`).
+- [ ] I verified the Dev Log summary text (`change` / `result` / `why`) is accurate for this PR title because the PR number and merge timestamp are auto-logged at merge time.
