@@ -493,15 +493,11 @@ class TaskTrackerApp:
         if path == "/settings/profile" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            if session_user["role"] == "employer":
-                return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             return self.handle_profile_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/settings/style" and method == "POST":
             if not session_user:
                 return self.redirect(start_response, "/login")
-            if session_user["role"] == "employer":
-                return self.redirect(start_response, "/", flash=("error", "Employer accounts are read-only."))
             return self.handle_style_settings(start_response, session_user, self.parse_form(environ))
 
         if path == "/onboarding/complete" and method == "POST":
@@ -2252,24 +2248,35 @@ class TaskTrackerApp:
               <header class='app-header'>
                 <div>
                   <p class="eyebrow">Monolith Flow</p>
-                  <h1>Welcome back</h1>
-                  <p class="subtitle">A retro-tactile workspace for ICHRA onboarding and team operations.</p>
+                  <h1>Launch your ICHRA workspace in minutes</h1>
+                  <p class="subtitle">Get a faster go-live with guided setup, transparent tracking, and team-ready onboarding.</p>
                 </div>
                 <div class='avatar-chip'>◉</div>
               </header>
-              <form method="post" action="/login" class="form-grid">
-                <label>Username <input type="text" name="username" placeholder="alex" required /></label>
-                <label>Password <input type="password" name="password" placeholder="user" required /></label>
-                <button type="submit" class='primary-action'>Start workspace</button>
-              </form>
+
+              <section class="section-block panel-card signup-highlight">
+                <h3>New Employer/Broker setup</h3>
+                <p class="subtitle">Join today to unlock guided enrollment, automated reminders, and a single source of truth for your ICHRA setup.</p>
+                <div class='signup-benefits'>
+                  <span class='pill pending'>Guided setup wizard</span>
+                  <span class='pill pending'>Team collaboration</span>
+                  <span class='pill pending'>Status visibility</span>
+                </div>
+                <button type="button" class="secondary" data-modal-open="public-setup-modal">Start New Setup</button>
+              </section>
+
+              <section class='section-block panel-card'>
+                <h3>Member Login</h3>
+                <form method="post" action="/login" class="form-grid">
+                  <label>Username <input type="text" name="username" placeholder="alex" required /></label>
+                  <label>Password <input type="password" name="password" placeholder="user" required /></label>
+                  <button type="submit" class='primary-action'>Start workspace</button>
+                </form>
+              </section>
+
               <section class='section-block panel-card'>
                 <h3>Active demo accounts (DB-backed)</h3>
                 <ul class='status-list compact-list'>{demo_rows or '<li>No active users found.</li>'}</ul>
-              </section>
-              <section class="section-block panel-card welcome-panel">
-                <h3>First time here?</h3>
-                <p class="subtitle">Start a public setup form. New brokers and employers remain unassigned until an admin places them on a team.</p>
-                <button type="button" class="secondary" data-modal-open="public-setup-modal">Open Setup Form</button>
               </section>
             </section>
             <div class="modal" id="public-setup-modal" aria-hidden="true">
@@ -2455,10 +2462,10 @@ class TaskTrackerApp:
         employer_profile = employers[0] if role == "employer" and employers else None
 
         nav_links = [("dashboard", "Dashboard")]
+        if show_application:
+            nav_links.append(("application", "ICHRA Setup Workspace"))
         if role in {"super_admin", "admin", "broker"}:
             nav_links.append(("employers", "Employers"))
-        if show_application:
-            nav_links.insert(1, ("application", "ICHRA Setup Workspace"))
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         nav_links.append(("permissions", "Permissions"))
@@ -2467,6 +2474,7 @@ class TaskTrackerApp:
         if show_logs:
             nav_links.append(("logs", "Activity Log"))
         nav_links.append(("devlog", "Dev Log"))
+        nav_links.append(("system", "System"))
 
         nav_html = "".join(
             f"<a class='nav-link {'active' if active_view == key else ''}' href='/?view={key}'>{label}</a>"
@@ -2579,9 +2587,7 @@ class TaskTrackerApp:
               {user_settings_modals}
             """
 
-        settings_section = "<section class='section-block'><p class='subtitle'>This account has no editable settings.</p></section>"
-        if role in {"super_admin", "admin", "broker"}:
-            settings_section = f"""
+        settings_section = f"""
               <section class='section-block settings-grid'>
                 <div>
                   <h3>User Settings</h3>
@@ -2614,13 +2620,16 @@ class TaskTrackerApp:
                         <option value='compact' {'selected' if user['density'] == 'compact' else ''}>Compact</option>
                       </select>
                     </label>
-                    <button type='submit'>Apply Styling</button>
+                    <button type='submit'>Save Style</button>
                   </form>
                 </div>
                 <div>
-                  <h3>Experience Preferences</h3>
+                  <h3>Workspace Preferences</h3>
                   <form method='post' action='/settings/preferences' class='form-grid'>
-                    <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle recommendations</label>
+                    <label>Avatar Symbol
+                      <input type='text' name='avatar_symbol' maxlength='2' value='{html.escape(user['avatar_symbol'] or '')}' />
+                    </label>
+                    <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle mode</label>
                     <button type='submit'>Save Preferences</button>
                   </form>
                 </div>
@@ -2629,25 +2638,43 @@ class TaskTrackerApp:
 
         teams = self.list_teams()
         assignable_admins = self.list_assignable_admins()
-        team_options = "".join(f"<option value='{row['id']}'>{html.escape(row['name'])}</option>" for row in teams)
-        admin_options = "".join(f"<option value='{row['id']}'>{html.escape(row['username'])}</option>" for row in assignable_admins)
-        broker_team_admin_options = "".join(
-            f"<option value='{broker['id']}'>"
-            f"{html.escape(team['name'])} · {html.escape(broker['username'])}{' (team admin)' if broker['is_team_admin'] else ''}"
-            "</option>"
-            for team in teams
-            for broker in self.list_brokers_for_team(team["id"])
-        )
         assignable_users = self.list_assignable_users()
-        assignable_user_options = "".join(
+
+        selected_team_id = None
+        if role == "super_admin":
+            requested_team_id = (query.get("team_id", [""])[0] or "").strip()
+            if requested_team_id.isdigit():
+                selected_team_id = int(requested_team_id)
+        else:
+            selected_team_id = user["team_id"]
+        if selected_team_id is None and teams:
+            selected_team_id = teams[0]["id"]
+        selected_team = next((row for row in teams if row["id"] == selected_team_id), None)
+
+        selected_team_name = html.escape(selected_team["name"]) if selected_team else "No team selected"
+        scoped_team_options = "".join(
+            f"<option value='{row['id']}' {'selected' if selected_team and row['id'] == selected_team['id'] else ''}>{html.escape(row['name'])}</option>"
+            for row in teams
+        )
+        scoped_admin_options = "".join(
+            f"<option value='{row['id']}'>{html.escape(row['username'])}</option>"
+            for row in assignable_admins
+            if selected_team is None or row["team_id"] in {None, selected_team["id"]}
+        )
+        scoped_assignable_user_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
             for row in assignable_users
         )
-        team_super_admin_options = "".join(
+        scoped_broker_options = "".join(
+            f"<option value='{broker['id']}'>{html.escape(broker['username'])}{' (team admin)' if broker['is_team_admin'] else ''}</option>"
+            for broker in (self.list_brokers_for_team(selected_team["id"]) if selected_team else [])
+        )
+        scoped_team_super_admin_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])}){' · current team super admin' if row['is_team_super_admin'] else ''}</option>"
             for row in assignable_users
             if row["role"] in {"admin", "broker"}
         )
+
         assign_task_user_options = "".join(
             f"<option value='{row['id']}'>{html.escape(row['display_name'])} ({html.escape(row['username'])} · {html.escape(row['role'])})</option>"
             for row in team_members
@@ -2672,8 +2699,93 @@ class TaskTrackerApp:
         )
         if not team_task_rows:
             team_task_rows = "<li class='subtitle'>No team tasks yet.</li>"
+
+        team_focus_summary = "<p class='subtitle'>No team is currently in focus.</p>"
+        team_member_rows = "<tr><td colspan='4'>No users in this team yet.</td></tr>"
+        if selected_team:
+            members = self.list_active_users_for_team(selected_team['id'])
+            team_focus_summary = f"""
+            <div class='stats-grid'>
+              <article class='panel-card'><h4>Team in Focus</h4><p>{selected_team_name}</p></article>
+              <article class='panel-card'><h4>Admins</h4><p>{selected_team['admin_count']}</p></article>
+              <article class='panel-card'><h4>Brokers</h4><p>{selected_team['broker_count']}</p></article>
+              <article class='panel-card'><h4>Employers</h4><p>{selected_team['employer_count']}</p></article>
+            </div>
+            """
+            team_member_rows = "".join(
+                f"<tr><td>{html.escape(member['display_name'])}</td><td>{html.escape(member['username'])}</td><td>{html.escape(member['role'])}</td><td>{'Yes' if ('is_team_super_admin' in member.keys() and member['is_team_super_admin']) else 'No'}</td></tr>"
+                for member in members
+            ) or "<tr><td colspan='4'>No users in this team yet.</td></tr>"
+
+        team_focus_picker = ""
+        team_create_form = ""
+        team_assign_admin_form = ""
+        team_assign_user_form = ""
+        team_assign_broker_admin_form = ""
+        team_assign_super_admin_form = ""
+        if role == "super_admin":
+            team_focus_picker = (
+                "<form method='get' action='/' class='inline-form'><input type='hidden' name='view' value='team' />"
+                f"<select name='team_id'><option value=''>Select team</option>{scoped_team_options}</select>"
+                "<button type='submit' class='secondary'>Focus Team</button></form>"
+            )
+            team_create_form = "<form method='post' action='/teams/create' class='inline-form'><input name='name' placeholder='new team name' required minlength='3' /><button type='submit'>Create Team</button></form>"
+            team_assign_admin_form = (
+                "<form method='post' action='/teams/assign-admin' class='inline-form'>"
+                f"<select name='admin_user_id' required><option value=''>Select admin</option>{scoped_admin_options}</select>"
+                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                "<button type='submit'>Assign Admin to Team</button></form>"
+            )
+            team_assign_user_form = (
+                "<form method='post' action='/teams/assign-user' class='inline-form'>"
+                f"<select name='user_id' required><option value=''>Select user</option>{scoped_assignable_user_options}</select>"
+                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                "<button type='submit'>Assign User to Team</button></form>"
+            )
+            team_assign_broker_admin_form = (
+                "<form method='post' action='/teams/assign-broker-admin' class='inline-form'>"
+                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                f"<select name='broker_user_id' required><option value=''>Select broker</option>{scoped_broker_options}</select>"
+                "<button type='submit'>Set Team Broker Admin</button></form>"
+            )
+            team_assign_super_admin_form = (
+                "<form method='post' action='/teams/assign-team-super-admin' class='inline-form'>"
+                f"<select name='team_id' required><option value=''>Select team</option>{scoped_team_options}</select>"
+                f"<select name='user_id' required><option value=''>Select admin or broker</option>{scoped_team_super_admin_options}</select>"
+                "<button type='submit'>Set Team Super Admin</button></form>"
+            )
+
+        team_workspace_panel = f"""
+          <section class='section-block panel-card'>
+            <h3>Team Workspace</h3>
+            <p class='subtitle'>Manage one team at a time. Choose a team, review members, then apply targeted assignment updates.</p>
+            {team_focus_picker}
+            {team_focus_summary}
+            {team_create_form}
+            {team_assign_admin_form}
+            {team_assign_user_form}
+            {team_assign_broker_admin_form}
+            {team_assign_super_admin_form}
+            <div class='table-wrap'><table class='user-table'>
+              <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Team Super Admin</th></tr></thead>
+              <tbody>{team_member_rows}</tbody>
+            </table></div>
+          </section>
+        """
+
+        team_panel = f"""
+            <nav class='dashboard-nav sub-nav'>
+              <a class='nav-link {'active' if query.get('team_section', [''])[0] != 'account-management' else ''}' href='/?view=team{f"&team_id={selected_team['id']}" if selected_team else ""}'>Team Workspace</a>
+              <a class='nav-link {'active' if query.get('team_section', [''])[0] == 'account-management' else ''}' href='/?view=team&team_section=account-management'>Account Management</a>
+            </nav>
+            {broker_admin_section if query.get('team_section', [''])[0] == 'account-management' else team_workspace_panel}
+        """
+
         notification_targets = self.get_users_with_completion(user)
-        notification_target_options = "".join(f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>" for row in notification_targets)
+        notification_target_options = "".join(
+            f"<option value='{row['id']}'>{html.escape(row['username'])} ({html.escape(row['role'])})</option>"
+            for row in notification_targets
+        )
         notification_rows = "".join(
             f"""
             <li>
@@ -2688,9 +2800,7 @@ class TaskTrackerApp:
             </li>
             """
             for row in notifications
-        )
-        if not notification_rows:
-            notification_rows = "<li class='subtitle'>No notifications yet.</li>"
+        ) or "<li class='subtitle'>No notifications yet.</li>"
 
         compose_notification_panel = ""
         if role in {"super_admin", "admin"}:
@@ -2723,105 +2833,6 @@ class TaskTrackerApp:
               </table></div>
             </section>
         """
-
-        super_admin_team_panel = ""
-        if role == "super_admin":
-            active_team_rows = ""
-            active_team_modals = ""
-            for row in teams:
-                members = self.list_active_users_for_team(row["id"])
-                member_rows = "".join(
-                    f"<tr><td>{html.escape(member['display_name'])}</td><td>{html.escape(member['username'])}</td><td>{html.escape(member['role'])}</td></tr>"
-                    for member in members
-                ) or "<tr><td colspan='3'>No active users in this team.</td></tr>"
-                modal_id = f"team-members-{row['id']}"
-                active_team_rows += f"""
-                <tr>
-                  <td>{html.escape(row['name'])}</td>
-                  <td>{row['admin_count']}</td>
-                  <td>{row['broker_count']}</td>
-                  <td>{row['employer_count']}</td>
-                  <td><button type='button' class='table-link as-button' data-modal-open='{modal_id}'>View members</button></td>
-                </tr>
-                """
-                active_team_modals += f"""
-                <div class='modal' id='{modal_id}' aria-hidden='true'>
-                  <div class='modal-backdrop' data-modal-close='{modal_id}'></div>
-                  <section class='modal-card card'>
-                    <button type='button' class='modal-close' aria-label='Close' data-modal-close='{modal_id}'>×</button>
-                    <h3>Active Members · {html.escape(row['name'])}</h3>
-                    <div class='table-wrap'><table class='user-table'>
-                      <thead><tr><th>Name</th><th>Username</th><th>Role</th></tr></thead>
-                      <tbody>{member_rows}</tbody>
-                    </table></div>
-                  </section>
-                </div>
-                """
-
-            if not active_team_rows:
-                active_team_rows = "<tr><td colspan='5'>No active teams yet.</td></tr>"
-
-            super_admin_team_panel = f"""
-            <section class='section-block panel-card'>
-              <h3>Team Administration</h3>
-              <form method='post' action='/teams/create' class='inline-form'>
-                <input name='name' placeholder='new team name' required minlength='3' />
-                <button type='submit'>Create Team</button>
-              </form>
-              <form method='post' action='/teams/assign-admin' class='inline-form'>
-                <select name='admin_user_id' required><option value=''>Select admin</option>{admin_options}</select>
-                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
-                <button type='submit'>Assign Admin to Team</button>
-              </form>
-              <form method='post' action='/teams/assign-user' class='inline-form'>
-                <select name='user_id' required><option value=''>Select user</option>{assignable_user_options}</select>
-                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
-                <button type='submit'>Assign User to Team</button>
-              </form>
-              <form method='post' action='/teams/assign-broker-admin' class='inline-form'>
-                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
-                <select name='broker_user_id' required><option value=''>Select broker</option>{broker_team_admin_options}</select>
-                <button type='submit'>Set Team Broker Admin</button>
-              </form>
-              <form method='post' action='/teams/assign-team-super-admin' class='inline-form'>
-                <select name='team_id' required><option value=''>Select team</option>{team_options}</select>
-                <select name='user_id' required><option value=''>Select admin or broker</option>{team_super_admin_options}</select>
-                <button type='submit'>Set Team Super Admin</button>
-              </form>
-              <div class='table-wrap'><table class='user-table'>
-                <thead><tr><th>Active Team</th><th>Admins</th><th>Brokers</th><th>Employers</th><th>Members</th></tr></thead>
-                <tbody>{active_team_rows}</tbody>
-              </table></div>
-            </section>
-            {active_team_modals}
-            """
-
-        team_sections = [
-            ("administration", "Team Administration") if role == "super_admin" else None,
-            ("account-management", "Super Admin - Account Management") if role in {"super_admin", "admin", "broker"} else None,
-        ]
-        team_sections = [section for section in team_sections if section]
-        if team_sections:
-            requested_team_section = (query.get("team_section", [""])[0] or "").strip().lower()
-            available_team_section_keys = {key for key, _ in team_sections}
-            active_team_section = requested_team_section if requested_team_section in available_team_section_keys else team_sections[0][0]
-            team_sub_nav = "".join(
-                f"<a class='nav-link {'active' if active_team_section == key else ''}' href='/?view=team&team_section={key}'>{label}</a>"
-                for key, label in team_sections
-            )
-
-            team_section_content = ""
-            if active_team_section == "administration":
-                team_section_content = super_admin_team_panel
-            elif active_team_section == "account-management":
-                team_section_content = broker_admin_section
-
-            team_panel = f"""
-                <nav class='dashboard-nav sub-nav'>{team_sub_nav}</nav>
-                {team_section_content}
-            """
-        else:
-            team_panel = "<section class='section-block'><p class='subtitle'>No team administration controls are available for this account.</p></section>"
 
         employer_applications_panel = ""
         header_primary_cta = ""
@@ -2992,6 +3003,24 @@ class TaskTrackerApp:
             </section>
         """
 
+        system_sections = [("permissions", "Permissions")]
+        if show_logs:
+            system_sections.append(("logs", "Activity Log"))
+        system_sections.append(("devlog", "Dev Log"))
+        requested_system_view = (query.get("system_view", [""])[0] or "").strip().lower()
+        valid_system_keys = {key for key, _ in system_sections}
+        active_system_view = requested_system_view if requested_system_view in valid_system_keys else system_sections[0][0]
+        system_nav = "".join(
+            f"<a class='nav-link {'active' if active_system_view == key else ''}' href='/?view=system&system_view={key}'>{label}</a>"
+            for key, label in system_sections
+        )
+        system_panels = {
+            "permissions": self.render_permissions_panel(),
+            "logs": logs_panel if show_logs else "<section class='section-block'><p class='subtitle'>No activity log access for this account.</p></section>",
+            "devlog": devlog_panel,
+        }
+        system_panel = f"<nav class='dashboard-nav sub-nav'>{system_nav}</nav>{system_panels.get(active_system_view, self.render_permissions_panel())}"
+
         panel_lookup = {
             "dashboard": dashboard_panel,
             "home": dashboard_panel,
@@ -3008,6 +3037,7 @@ class TaskTrackerApp:
             "devlog": devlog_panel,
             "settings": settings_section,
             "logs": logs_panel if show_logs else "",
+            "system": system_panel,
         }
 
         if not personalization["onboarding_complete"] and active_view in {"dashboard", "home"}:
@@ -3043,6 +3073,7 @@ class TaskTrackerApp:
                 <div class='header-actions'>
                   <span class='avatar-chip'>{html.escape(avatar_symbol)}</span>
                   {header_primary_cta}
+                  {"<a class='nav-link' href='/?view=settings'>Settings</a>" if show_settings else ''}
                   <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
                 </div>
               </header>

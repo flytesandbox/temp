@@ -639,7 +639,7 @@ class AppTests(unittest.TestCase):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
 
-        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
+        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
         self.assertIn("Team", view["body"])
         self.assertIn("Account Management", view["body"])
 
@@ -760,7 +760,7 @@ class AppTests(unittest.TestCase):
         self.assertIn("admin", login_page["body"])
         self.assertIn("brokerx", login_page["body"])
         self.assertIn("alex", login_page["body"])
-        self.assertIn("Open Setup Form", login_page["body"])
+        self.assertIn("Start New Setup", login_page["body"])
         self.assertIn("public-setup-modal", login_page["body"])
         self.assertIn("New Employer Setup Form", login_page["body"])
         self.assertIn("New Broker Setup Form", login_page["body"])
@@ -1073,18 +1073,18 @@ class AppTests(unittest.TestCase):
     def test_super_admin_team_management_forms_present(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
-        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
-        self.assertIn("Team Administration", view["body"])
+        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        self.assertIn("Team Workspace", view["body"])
         self.assertIn("/teams/create", view["body"])
         self.assertIn("/teams/assign-admin", view["body"])
 
     def test_team_administration_shows_active_team_table_and_member_modal_trigger(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
-        view = call_app(self.app, method="GET", path="/", query_string="view=team&team_section=administration", cookie_header=cookie)
-        self.assertIn("Active Team", view["body"])
-        self.assertIn("View members", view["body"])
-        self.assertIn("team-members-", view["body"])
+        view = call_app(self.app, method="GET", path="/", query_string="view=team", cookie_header=cookie)
+        self.assertIn("Team in Focus", view["body"])
+        self.assertIn("Team Super Admin", view["body"])
+        self.assertIn("Focus Team", view["body"])
 
     def test_admin_can_send_notification_to_super_admin(self):
         admin_cookie = ""
@@ -1404,6 +1404,54 @@ class AppTests(unittest.TestCase):
 
         relogin = call_app(self.app, method="POST", path="/login", body="username=teamadmin2&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+    def test_system_nav_item_routes_to_subnav_sections(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=admin&password=user")["headers"])
+
+        dashboard = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=dashboard")
+        self.assertIn("href='/?view=system'", dashboard["body"])
+
+        system_view = call_app(self.app, method="GET", path="/", cookie_header=cookie, query_string="view=system&system_view=logs")
+        self.assertIn("Permissions", system_view["body"])
+        self.assertIn("Activity Log", system_view["body"])
+        self.assertIn("Dev Log", system_view["body"])
+
+    def test_employer_can_update_own_settings(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Settings+Co&contact_name=Elle&work_email=elle%40settings.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fsettings.com&state=WA"
+            ),
+            cookie_header=admin_cookie,
+        )
+
+        db = self.app.db()
+        employer_user = db.execute("SELECT username FROM users WHERE role='employer' ORDER BY id DESC LIMIT 1").fetchone()
+        db.close()
+
+        employer_cookie = ""
+        employer_cookie = merge_cookies(
+            employer_cookie,
+            call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}&password=user")["headers"],
+        )
+
+        update = call_app(
+            self.app,
+            method="POST",
+            path="/settings/profile",
+            body=f"username={employer_user['username']}2&password=newpass",
+            cookie_header=employer_cookie,
+        )
+        self.assertEqual(dict(update["headers"]).get("Location"), "/")
+
+        relogin = call_app(self.app, method="POST", path="/login", body=f"username={employer_user['username']}2&password=newpass")
+        self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
+
 
 if __name__ == "__main__":
     unittest.main()
