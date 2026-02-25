@@ -374,7 +374,7 @@ class AppTests(unittest.TestCase):
         relogin = call_app(self.app, method="POST", path="/login", body="username=teambroker&password=user")
         self.assertEqual(dict(relogin["headers"]).get("Location"), "/")
 
-    def test_broker_can_create_employer_but_not_admin_or_broker(self):
+    def test_broker_cannot_create_admin_broker_or_employer_from_account_management(self):
         admin_cookie = ""
         login_admin = call_app(self.app, method="POST", path="/login", body="username=admin&password=user")
         admin_cookie = merge_cookies(admin_cookie, login_admin["headers"])
@@ -410,14 +410,17 @@ class AppTests(unittest.TestCase):
         )
         self.assertEqual(dict(denied_broker["headers"]).get("Location"), "/")
 
-        allowed_employer = call_app(
+        denied_employer = call_app(
             self.app,
             method="POST",
             path="/admin/users/create",
             body="username=brokeremployer&role=employer",
             cookie_header=broker_cookie,
         )
-        self.assertEqual(dict(allowed_employer["headers"]).get("Location"), "/")
+        self.assertEqual(dict(denied_employer["headers"]).get("Location"), "/")
+
+        employer_exists = self.app.get_user("brokeremployer")
+        self.assertIsNone(employer_exists)
 
 
     def test_effective_access_endpoint_returns_capability_payload(self):
