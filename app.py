@@ -1050,9 +1050,9 @@ class TaskTrackerApp:
                        broker.username AS broker_username
                 FROM employers e
                 LEFT JOIN users u ON u.id = e.linked_user_id
-                LEFT JOIN users broker ON broker.id = e.broker_user_id AND broker.is_active = 1
-                LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id AND owner_admin.is_active = 1
-                LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id AND employer_user.is_active = 1
+                LEFT JOIN users broker ON broker.id = e.broker_user_id
+                LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id
+                LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id
                 WHERE (
                     e.primary_user_id = ?
                     OR e.broker_user_id = ?
@@ -2400,7 +2400,6 @@ class TaskTrackerApp:
         theme_variant = user["theme"] if user["theme"] != "default" else personalization["theme"]
         vibe_pack = personalization["vibe"]
         module_order = personalization["order"].split(",")
-        avatar_symbol = personalization["avatar"]
         team = self.get_team_for_user(user["id"])
         team_tasks = self.list_visible_team_tasks(user)
         team_members = self.list_team_members(user["team_id"]) if user["team_id"] is not None else []
@@ -2469,11 +2468,6 @@ class TaskTrackerApp:
         nav_links.append(("team", "Team"))
         nav_links.append(("notifications", f"Notifications {'⚠️' if unseen_count else ''}"))
         nav_links.append(("permissions", "Permissions"))
-        if show_settings:
-            nav_links.append(("settings", "Settings"))
-        if show_logs:
-            nav_links.append(("logs", "Activity Log"))
-        nav_links.append(("devlog", "Dev Log"))
         nav_links.append(("system", "System"))
 
         nav_html = "".join(
@@ -2626,9 +2620,6 @@ class TaskTrackerApp:
                 <div>
                   <h3>Workspace Preferences</h3>
                   <form method='post' action='/settings/preferences' class='form-grid'>
-                    <label>Avatar Symbol
-                      <input type='text' name='avatar_symbol' maxlength='2' value='{html.escape(user['avatar_symbol'] or '')}' />
-                    </label>
                     <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle mode</label>
                     <button type='submit'>Save Preferences</button>
                   </form>
@@ -2993,8 +2984,8 @@ class TaskTrackerApp:
         profile_panel = f"""
             <section class='section-block panel-card'>
               <h3>Profile</h3>
-              <p class='subtitle'>Avatar, identity, and contribution summary.</p>
-              <div class='avatar-hero'>{html.escape(avatar_symbol)} <strong>{html.escape(user['display_name'])}</strong> · {html.escape(role)}</div>
+              <p class='subtitle'>Identity and contribution summary.</p>
+              <div><strong>{html.escape(user['display_name'])}</strong> · {html.escape(role)}</div>
               <div class='stats-grid'>
                 <article><h4>Completed applications</h4><p>{sum(1 for row in employers if row['application_complete'])}</p></article>
                 <article><h4>Team tasks done</h4><p>{sum(1 for row in team_tasks if row['status'] == 'completed')}</p></article>
@@ -3045,9 +3036,8 @@ class TaskTrackerApp:
             active_panel = f"""
               <section class='section-block panel-card'>
                 <h3>First Run Personalization</h3>
-                <p class='subtitle'>30-second setup for your ICHRA Setup Workspace: choose an avatar and turn shuffle mode on/off.</p>
+                <p class='subtitle'>30-second setup for your ICHRA Setup Workspace: turn shuffle mode on/off.</p>
                 <form method='post' action='/onboarding/complete' class='form-grid'>
-                  <label>Avatar symbol <input name='avatar_symbol' maxlength='2' placeholder='{html.escape(avatar_symbol)}' /></label>
                   <label class='check-row'><input type='checkbox' name='shuffle_enabled' value='1' {'checked' if user['shuffle_enabled'] else ''} /> Enable shuffle-style module rotation</label>
                   <button type='submit' class='primary-action'>Finish setup</button>
                 </form>
@@ -3071,10 +3061,9 @@ class TaskTrackerApp:
                   <p class='subtitle'>Welcome, {html.escape(user['display_name'])}</p>
                 </div>
                 <div class='header-actions'>
-                  <span class='avatar-chip'>{html.escape(avatar_symbol)}</span>
                   {header_primary_cta}
-                  {"<a class='nav-link' href='/?view=settings'>Settings</a>" if show_settings else ''}
-                  <form method='post' action='/logout'><button class='secondary' type='submit'>Log Out</button></form>
+                  {"<a class='header-action-btn' href='/?view=settings'>Settings</a>" if show_settings else ''}
+                  <form method='post' action='/logout'><button class='header-action-btn logout-btn' type='submit'>Log Out</button></form>
                 </div>
               </header>
               <div class='dashboard-layout'>
