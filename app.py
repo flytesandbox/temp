@@ -109,6 +109,7 @@ DEV_LOG_ENTRIES = [
     {"pr": 76, "merged_at": "2026-02-25 13:54 UTC", "change": "Merged PR #76: Move Employers into Team sub-nav and fix default employer list scope", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 77, "merged_at": "2026-02-25 14:20 UTC", "change": "Merged PR #77: ICHRA Workspace: Employer Snapshot UI and active-only selector", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
     {"pr": 78, "merged_at": "2026-02-25 14:29 UTC", "change": "Merged PR #78: Add System 'Dev Note' tab and compact Employer Snapshot tiles", "result": "Development Log entry added automatically by CI.", "why": "Guarantee every merged PR is recorded in the in-app Dev Log."},
+    {"pr": 79, "merged_at": "2026-02-25 15:10 UTC", "change": "Fixed employer visibility scope joins so active employers consistently appear across Employers list, ICHRA workspace selectors, and notification targeting.", "result": "Active employers now populate correctly for admins and team-super brokers while preserving existing permission boundaries.", "why": "Eliminate missing-employer regressions caused by over-reliance on owner/broker team joins when created_by remained in-scope."},
 ]
 
 
@@ -769,10 +770,18 @@ class TaskTrackerApp:
             return [row for row in rows if include_super_admin or row['role'] != 'super_admin']
         if session_user['role'] == 'employer':
             return [row for row in rows if row['id'] == session_user['id']]
+        visible_employer_user_ids = {
+            employer_row['linked_user_id']
+            for employer_row in self.list_visible_employers(session_user)
+            if employer_row['portal_user_is_active']
+        }
         return [
             row
             for row in rows
-            if row['team_id'] == session_user['team_id']
+            if (
+                (row['role'] == 'employer' and row['id'] in visible_employer_user_ids)
+                or (row['role'] != 'employer' and row['team_id'] == session_user['team_id'])
+            )
             and (include_super_admin or row['role'] != 'super_admin')
         ]
 
@@ -1076,17 +1085,20 @@ class TaskTrackerApp:
                 LEFT JOIN users u ON u.id = e.linked_user_id
                 LEFT JOIN users broker ON broker.id = e.broker_user_id
                 LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id
+                LEFT JOIN users creator_user ON creator_user.id = e.created_by_user_id
                 LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id
                 WHERE (
-                    e.primary_user_id = ?
+                    e.created_by_user_id = ?
+                    OR e.primary_user_id = ?
                     OR e.broker_user_id = ?
+                    OR (creator_user.team_id IS NOT NULL AND creator_user.team_id = ?)
                     OR (owner_admin.team_id IS NOT NULL AND owner_admin.team_id = ?)
                     OR (broker.team_id IS NOT NULL AND broker.team_id = ?)
                     OR (employer_user.team_id IS NOT NULL AND employer_user.team_id = ?)
                 )
                 ORDER BY e.created_at DESC
                 """,
-                (session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
+                (session_user["id"], session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
             ).fetchall()
         elif session_user["role"] == "broker":
             if session_user["is_team_super_admin"] == 1:
@@ -1099,16 +1111,19 @@ class TaskTrackerApp:
                     LEFT JOIN users u ON u.id = e.linked_user_id
                     LEFT JOIN users broker ON broker.id = e.broker_user_id
                     LEFT JOIN users owner_admin ON owner_admin.id = e.primary_user_id
+                    LEFT JOIN users creator_user ON creator_user.id = e.created_by_user_id
                     LEFT JOIN users employer_user ON employer_user.id = e.linked_user_id
                     WHERE (
-                        e.broker_user_id = ?
+                        e.created_by_user_id = ?
+                        OR e.broker_user_id = ?
+                        OR (creator_user.team_id IS NOT NULL AND creator_user.team_id = ?)
                         OR (owner_admin.team_id IS NOT NULL AND owner_admin.team_id = ?)
                         OR (broker.team_id IS NOT NULL AND broker.team_id = ?)
                         OR (employer_user.team_id IS NOT NULL AND employer_user.team_id = ?)
                     )
                     ORDER BY e.created_at DESC
                     """,
-                    (session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
+                    (session_user["id"], session_user["id"], session_user["team_id"], session_user["team_id"], session_user["team_id"], session_user["team_id"]),
                 ).fetchall()
             else:
                 rows = db.execute(
@@ -2532,6 +2547,7 @@ class TaskTrackerApp:
               <li><strong>Single broker admin per team:</strong> The broker-team-admin designation is singleton per team and can only be reassigned by a super admin.</li>
               <li><strong>Application lock model:</strong> Submitted ICHRA applications become token-locked until an operations role renews access, enabling controlled post-submit edits.</li>
               <li><strong>Effective access endpoint:</strong> <code>GET /me/access</code> returns capability flags plus scoped memberships so UI can render access-aware actions without trial-and-error 403 flows.</li>
+              <li><strong>Employer visibility guardrail:</strong> Admin/team-broker employer scope must include <code>created_by_user_id</code> and creator-team joins in addition to owner/broker joins; notification targeting for employer users follows that same scoped employer set.</li>
             </ul>
           </section>
         """
