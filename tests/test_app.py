@@ -610,6 +610,51 @@ class AppTests(unittest.TestCase):
         self.assertIn("Portal Status", all_view["body"])
         self.assertIn(">Inactive<", all_view["body"])
 
+
+    def test_main_nav_hides_settings_activity_log_and_dev_log_links(self):
+        cookie = ""
+        cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+
+        view = call_app(self.app, method="GET", path="/", query_string="view=dashboard", cookie_header=cookie)
+        start = view["body"].find("<nav class='dashboard-nav floating-nav'>")
+        end = view["body"].find("</nav>", start)
+        nav_html = view["body"][start:end]
+        self.assertNotIn("/?view=settings", nav_html)
+        self.assertNotIn("/?view=logs", nav_html)
+        self.assertNotIn("/?view=devlog", nav_html)
+
+    def test_admin_employer_scope_includes_team_employers_when_broker_deactivated(self):
+        admin_cookie = ""
+        admin_cookie = merge_cookies(admin_cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
+
+        call_app(
+            self.app,
+            method="POST",
+            path="/admin/users/create",
+            body="username=inactivebookbroker&password=user&role=broker",
+            cookie_header=admin_cookie,
+        )
+        broker_cookie = ""
+        broker_cookie = merge_cookies(broker_cookie, call_app(self.app, method="POST", path="/login", body="username=inactivebookbroker&password=user")["headers"])
+        call_app(
+            self.app,
+            method="POST",
+            path="/employers/create",
+            body=(
+                "legal_name=Team+Scoped+Inactive+Broker+Employer&contact_name=Pat&work_email=pat%40scope.com&phone=555"
+                "&company_size=10&industry=Retail&website=https%3A%2F%2Fscope.com&state=WA"
+            ),
+            cookie_header=broker_cookie,
+        )
+
+        db = self.app.db()
+        db.execute("UPDATE users SET is_active = 0 WHERE username = 'inactivebookbroker'")
+        db.commit()
+        db.close()
+
+        employers_view = call_app(self.app, method="GET", path="/", query_string="view=employers&employers_scope=all", cookie_header=admin_cookie)
+        self.assertIn("Team Scoped Inactive Broker Employer", employers_view["body"])
+
     def test_employer_application_status_shows_not_started_before_ichra(self):
         cookie = ""
         cookie = merge_cookies(cookie, call_app(self.app, method="POST", path="/login", body="username=alex&password=user")["headers"])
