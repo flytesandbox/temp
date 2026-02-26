@@ -2419,7 +2419,10 @@ class TaskTrackerApp:
             <section class="card auth-card vibe-orbit">
               <header class='app-header'>
                 <div>
-                  <p class="eyebrow">Monolith Flow</p>
+                  <div class="login-heading-row">
+                    <span class="login-heading-icon" aria-hidden="true">🔐</span>
+                    <p class="eyebrow">Monolith Flow</p>
+                  </div>
                   <h1>Launch your ICHRA workspace in minutes</h1>
                   <p class="subtitle">Get a faster go-live with guided setup, transparent tracking, and team-ready onboarding.</p>
                 </div>
